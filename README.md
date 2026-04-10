@@ -174,6 +174,8 @@ curl http://localhost:8080/api/v1/queues/default/stats
 | [核心组件](docs/components.md) | Scheduler、Worker、存储层详细说明 |
 | [数据模型](docs/data-models.md) | Task/Worker/Queue 数据结构、状态机 |
 | [存储层设计](docs/storage.md) | 表结构、Redis/etcd/MySQL 选型、容量规划、归档策略 |
+| [队列选型分析](docs/queue-selection.md) | 6 种 MQ 方案逐一对照分析、决策推导过程 |
+| [为什么不用 MySQL 做队列](docs/why-not-mysql-queue.md) | FOR UPDATE 锁机制、并发出队问题、性能天花板分析 |
 | [API 参考](docs/api-reference.md) | REST API 和 gRPC 接口完整文档 |
 | [队列设计](docs/queue-design.md) | 优先级队列、延迟队列、Lua 脚本详解 |
 | [部署指南](docs/deployment.md) | Kubernetes 部署、Helm Chart、运维手册 |
