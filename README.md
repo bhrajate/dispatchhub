@@ -173,6 +173,7 @@ curl http://localhost:8080/api/v1/queues/default/stats
 | [架构设计](docs/architecture.md) | 整体架构、三高设计方案、设计决策 |
 | [核心组件](docs/components.md) | Scheduler、Worker、存储层详细说明 |
 | [数据模型](docs/data-models.md) | Task/Worker/Queue 数据结构、状态机 |
+| [存储层设计](docs/storage.md) | 表结构、Redis/etcd/MySQL 选型、容量规划、归档策略 |
 | [API 参考](docs/api-reference.md) | REST API 和 gRPC 接口完整文档 |
 | [队列设计](docs/queue-design.md) | 优先级队列、延迟队列、Lua 脚本详解 |
 | [部署指南](docs/deployment.md) | Kubernetes 部署、Helm Chart、运维手册 |
