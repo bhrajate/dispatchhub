@@ -1,0 +1,92 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: dispatchhub-config
+  namespace: dispatchhub
+data:
+  config.yaml: |
+    server:
+      grpc_addr: ":9090"
+      http_addr: ":8080"
+
+    scheduler:
+      lease_duration: 15s
+      renew_interval: 5s
+      schedule_interval: 100ms
+      max_batch_size: 100
+      virtual_nodes: 150
+
+    worker:
+      queues:
+        - default
+        - high-priority
+        - batch
+      concurrency: 100
+      heartbeat_interval: 5s
+      shutdown_timeout: 30s
+      task_timeout: 5m
+
+    etcd:
+      endpoints:
+        - etcd-0.etcd-headless.dispatchhub.svc.cluster.local:2379
+        - etcd-1.etcd-headless.dispatchhub.svc.cluster.local:2379
+        - etcd-2.etcd-headless.dispatchhub.svc.cluster.local:2379
+      dial_timeout: 5s
+
+    redis:
+      cluster_mode: true
+      cluster_addrs:
+        - redis-cluster-0.redis-cluster-headless.dispatchhub.svc.cluster.local:6379
+        - redis-cluster-1.redis-cluster-headless.dispatchhub.svc.cluster.local:6379
+        - redis-cluster-2.redis-cluster-headless.dispatchhub.svc.cluster.local:6379
+      pool_size: 100
+      min_idle_conns: 10
+
+    mysql:
+      dsn: "dispatchhub:${MYSQL_PASSWORD}@tcp(mysql.dispatchhub.svc.cluster.local:3306)/dispatchhub?charset=utf8mb4&parseTime=true&loc=Local"
+      max_open_conns: 50
+      max_idle_conns: 10
+      conn_max_lifetime: 1h
+
+    metrics:
+      enabled: true
+      addr: ":9091"
+      path: "/metrics"
+
+    log:
+      level: info
+      format: json
+      output: stdout
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: dispatchhub
+  namespace: dispatchhub
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: dispatchhub
+  namespace: dispatchhub
+rules:
+  - apiGroups: [""]
+    resources: ["configmaps"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: [""]
+    resources: ["pods"]
+    verbs: ["get", "list"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: dispatchhub
+  namespace: dispatchhub
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: dispatchhub
+subjects:
+  - kind: ServiceAccount
+    name: dispatchhub
+    namespace: dispatchhub

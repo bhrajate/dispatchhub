@@ -1,0 +1,13 @@
+apiVersion: v2
+name: dispatchhub
+description: Cloud-native distributed task scheduling system
+type: application
+version: 0.1.0
+appVersion: "0.1.0"
+keywords:
+  - task-scheduler
+  - distributed
+  - cloud-native
+  - queue
+maintainers:
+  - name: dispatchhub

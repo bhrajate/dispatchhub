@@ -1,0 +1,189 @@
+syntax = "proto3";
+
+package dispatch.v1;
+
+option go_package = "github.com/dispatchhub/dispatchhub/api/proto/dispatch/v1;dispatchv1";
+
+import "google/protobuf/timestamp.proto";
+import "google/protobuf/duration.proto";
+
+// DispatchService is the main API for task management.
+service DispatchService {
+  // Task operations
+  rpc SubmitTask(SubmitTaskRequest) returns (SubmitTaskResponse);
+  rpc GetTask(GetTaskRequest) returns (GetTaskResponse);
+  rpc ListTasks(ListTasksRequest) returns (ListTasksResponse);
+  rpc CancelTask(CancelTaskRequest) returns (CancelTaskResponse);
+
+  // Queue operations
+  rpc GetQueueStats(GetQueueStatsRequest) returns (GetQueueStatsResponse);
+  rpc PauseQueue(PauseQueueRequest) returns (PauseQueueResponse);
+  rpc ResumeQueue(ResumeQueueRequest) returns (ResumeQueueResponse);
+
+  // Worker operations
+  rpc ListWorkers(ListWorkersRequest) returns (ListWorkersResponse);
+
+  // Streaming: real-time task events
+  rpc WatchTasks(WatchTasksRequest) returns (stream TaskEvent);
+}
+
+// --- Task messages ---
+
+message TaskSpec {
+  string name = 1;
+  string namespace = 2;
+  string group = 3;
+  string type = 4;
+  bytes payload = 5;
+  map<string, string> labels = 6;
+  TaskPriority priority = 7;
+  google.protobuf.Duration delay = 8;
+  google.protobuf.Timestamp schedule_at = 9;
+  string cron_expr = 10;
+  google.protobuf.Duration timeout = 11;
+  google.protobuf.Timestamp deadline = 12;
+  int32 max_retries = 13;
+  google.protobuf.Duration retry_backoff = 14;
+  string queue_name = 15;
+}
+
+enum TaskPriority {
+  TASK_PRIORITY_UNSPECIFIED = 0;
+  TASK_PRIORITY_LOW = 1;
+  TASK_PRIORITY_DEFAULT = 5;
+  TASK_PRIORITY_HIGH = 8;
+  TASK_PRIORITY_CRITICAL = 10;
+}
+
+enum TaskState {
+  TASK_STATE_UNSPECIFIED = 0;
+  TASK_STATE_PENDING = 1;
+  TASK_STATE_SCHEDULED = 2;
+  TASK_STATE_RUNNING = 3;
+  TASK_STATE_RETRYING = 4;
+  TASK_STATE_COMPLETED = 5;
+  TASK_STATE_FAILED = 6;
+  TASK_STATE_CANCELLED = 7;
+  TASK_STATE_TIMEOUT = 8;
+}
+
+message Task {
+  string id = 1;
+  TaskSpec spec = 2;
+  TaskState state = 3;
+  string result = 4;
+  string error = 5;
+  string worker_id = 6;
+  int32 retry_count = 7;
+  google.protobuf.Timestamp created_at = 8;
+  google.protobuf.Timestamp started_at = 9;
+  google.protobuf.Timestamp finished_at = 10;
+  int64 version = 11;
+}
+
+message SubmitTaskRequest {
+  TaskSpec spec = 1;
+}
+
+message SubmitTaskResponse {
+  string task_id = 1;
+  Task task = 2;
+}
+
+message GetTaskRequest {
+  string task_id = 1;
+}
+
+message GetTaskResponse {
+  Task task = 1;
+}
+
+message ListTasksRequest {
+  string namespace = 1;
+  string group = 2;
+  string type = 3;
+  TaskState state = 4;
+  map<string, string> labels = 5;
+  string queue_name = 6;
+  int32 limit = 7;
+  int32 offset = 8;
+}
+
+message ListTasksResponse {
+  repeated Task tasks = 1;
+  int64 total = 2;
+}
+
+message CancelTaskRequest {
+  string task_id = 1;
+}
+
+message CancelTaskResponse {
+  Task task = 1;
+}
+
+// --- Queue messages ---
+
+message GetQueueStatsRequest {
+  string queue_name = 1;
+}
+
+message GetQueueStatsResponse {
+  string queue_name = 1;
+  int64 pending = 2;
+  int64 active = 3;
+  int64 scheduled = 4;
+  int64 retrying = 5;
+  int64 completed = 6;
+  int64 failed = 7;
+}
+
+message PauseQueueRequest {
+  string queue_name = 1;
+}
+
+message PauseQueueResponse {}
+
+message ResumeQueueRequest {
+  string queue_name = 1;
+}
+
+message ResumeQueueResponse {}
+
+// --- Worker messages ---
+
+message WorkerInfo {
+  string id = 1;
+  string hostname = 2;
+  string ip = 3;
+  repeated string queues = 4;
+  int32 concurrency = 5;
+  int32 active_tasks = 6;
+  double cpu_usage = 7;
+  double mem_usage = 8;
+  string state = 9;
+  google.protobuf.Timestamp started_at = 10;
+  google.protobuf.Timestamp last_heartbeat = 11;
+}
+
+message ListWorkersRequest {}
+
+message ListWorkersResponse {
+  repeated WorkerInfo workers = 1;
+}
+
+// --- Events ---
+
+message WatchTasksRequest {
+  string namespace = 1;
+  string queue_name = 2;
+}
+
+message TaskEvent {
+  string task_id = 1;
+  string event_type = 2;
+  TaskState old_state = 3;
+  TaskState new_state = 4;
+  string worker_id = 5;
+  google.protobuf.Timestamp timestamp = 6;
+}

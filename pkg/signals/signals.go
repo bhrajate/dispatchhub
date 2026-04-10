@@ -1,0 +1,31 @@
+package signals
+
+import (
+	"context"
+	"os"
+	"os/signal"
+	"syscall"
+
+	"github.com/dispatchhub/dispatchhub/pkg/log"
+)
+
+// SetupSignalContext returns a context that is cancelled on SIGINT or SIGTERM.
+// Second signal forces immediate exit.
+func SetupSignalContext() context.Context {
+	ctx, cancel := context.WithCancel(context.Background())
+
+	ch := make(chan os.Signal, 2)
+	signal.Notify(ch, syscall.SIGINT, syscall.SIGTERM)
+
+	go func() {
+		sig := <-ch
+		log.Infof("received signal %s, initiating graceful shutdown", sig)
+		cancel()
+
+		sig = <-ch
+		log.Infof("received second signal %s, forcing exit", sig)
+		os.Exit(1)
+	}()
+
+	return ctx
+}
