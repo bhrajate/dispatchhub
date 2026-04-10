@@ -1,0 +1,7 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: dispatchhub
+  labels:
+    app.kubernetes.io/name: dispatchhub
+    app.kubernetes.io/part-of: dispatchhub

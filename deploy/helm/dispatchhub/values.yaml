@@ -1,0 +1,107 @@
+# Default values for dispatchhub Helm chart.
+
+global:
+  image:
+    registry: ""
+    pullPolicy: IfNotPresent
+    pullSecrets: []
+
+scheduler:
+  enabled: true
+  replicas: 3
+  image:
+    repository: dispatchhub/scheduler
+    tag: ""  # defaults to .Chart.AppVersion
+  resources:
+    requests:
+      cpu: 200m
+      memory: 256Mi
+    limits:
+      cpu: "1"
+      memory: 512Mi
+  service:
+    type: ClusterIP
+    httpPort: 8080
+    grpcPort: 9090
+  config:
+    leaseDuration: 15s
+    renewInterval: 5s
+    scheduleInterval: 100ms
+    maxBatchSize: 100
+    virtualNodes: 150
+
+worker:
+  enabled: true
+  replicas: 5
+  image:
+    repository: dispatchhub/worker
+    tag: ""
+  resources:
+    requests:
+      cpu: 500m
+      memory: 512Mi
+    limits:
+      cpu: "2"
+      memory: 1Gi
+  autoscaling:
+    enabled: true
+    minReplicas: 3
+    maxReplicas: 50
+    targetCPUUtilization: 70
+  config:
+    queues:
+      - default
+      - high-priority
+    concurrency: 100
+    heartbeatInterval: 5s
+    shutdownTimeout: 30s
+    taskTimeout: 5m
+
+apiserver:
+  enabled: true
+  replicas: 2
+  image:
+    repository: dispatchhub/apiserver
+    tag: ""
+  resources:
+    requests:
+      cpu: 200m
+      memory: 256Mi
+    limits:
+      cpu: "1"
+      memory: 512Mi
+  ingress:
+    enabled: false
+    className: nginx
+    hosts:
+      - host: dispatchhub.local
+        paths:
+          - path: /
+            pathType: Prefix
+    tls: []
+
+etcd:
+  endpoints:
+    - etcd:2379
+  auth:
+    enabled: false
+
+redis:
+  clusterMode: false
+  addr: redis:6379
+  password: ""
+  poolSize: 100
+
+mysql:
+  dsn: "root:@tcp(mysql:3306)/dispatchhub?charset=utf8mb4&parseTime=true&loc=Local"
+  maxOpenConns: 50
+
+metrics:
+  enabled: true
+  serviceMonitor:
+    enabled: false
+    interval: 15s
+
+log:
+  level: info
+  format: json

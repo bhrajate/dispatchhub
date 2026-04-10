@@ -1,0 +1,7 @@
+bin/
+.git/
+*.md
+.dockerignore
+Dockerfile
+deploy/
+coverage.out
