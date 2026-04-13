@@ -10,7 +10,9 @@ import (
 	"github.com/dispatchhub/dispatchhub/pkg/hash"
 	"github.com/dispatchhub/dispatchhub/pkg/log"
 	"github.com/dispatchhub/dispatchhub/pkg/metrics"
+	"github.com/dispatchhub/dispatchhub/pkg/ratelimit"
 	"github.com/dispatchhub/dispatchhub/pkg/store"
+	redisqueue "github.com/dispatchhub/dispatchhub/pkg/store/redis"
 	"github.com/dispatchhub/dispatchhub/pkg/types"
 	"github.com/google/uuid"
 )
@@ -31,10 +33,12 @@ type Scheduler struct {
 	taskStore store.TaskStore
 	registry  store.Registry
 	ring      *hash.ConsistentHash
+	limiter   *ratelimit.MultiQueueLimiter
 
-	mu      sync.RWMutex
-	workers map[string]*types.WorkerInfo
-	queues  []string
+	mu           sync.RWMutex
+	workers      map[string]*types.WorkerInfo
+	queues       []string
+	queueConfigs map[string]*types.QueueConfig
 
 	stopCh chan struct{}
 }
@@ -42,15 +46,37 @@ type Scheduler struct {
 // New creates a new Scheduler.
 func New(cfg config.SchedulerConfig, broker store.QueueBroker, taskStore store.TaskStore, registry store.Registry) *Scheduler {
 	return &Scheduler{
-		cfg:       cfg,
-		broker:    broker,
-		taskStore: taskStore,
-		registry:  registry,
-		ring:      hash.NewConsistentHash(cfg.VirtualNodes),
-		workers:   make(map[string]*types.WorkerInfo),
-		queues:    []string{types.DefaultQueueName},
-		stopCh:    make(chan struct{}),
+		cfg:          cfg,
+		broker:       broker,
+		taskStore:    taskStore,
+		registry:     registry,
+		ring:         hash.NewConsistentHash(cfg.VirtualNodes),
+		limiter:      ratelimit.NewMultiQueueLimiter(0, 0),
+		workers:      make(map[string]*types.WorkerInfo),
+		queues:       []string{types.DefaultQueueName},
+		queueConfigs: make(map[string]*types.QueueConfig),
+		stopCh:       make(chan struct{}),
 	}
+}
+
+// ErrQueueRateLimited is returned when the queue's rate limit is exceeded.
+var ErrQueueRateLimited = fmt.Errorf("queue rate limit exceeded")
+
+// SetQueueConfig registers a queue configuration for capacity and rate limit enforcement.
+func (s *Scheduler) SetQueueConfig(cfg *types.QueueConfig) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.queueConfigs[cfg.Name] = cfg
+	if cfg.RateLimit > 0 {
+		s.limiter.SetRate(cfg.Name, float64(cfg.RateLimit), cfg.RateLimit)
+	}
+}
+
+// getQueueConfig returns the queue configuration, or nil if not set.
+func (s *Scheduler) getQueueConfig(queue string) *types.QueueConfig {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.queueConfigs[queue]
 }
 
 // SubmitTask validates and enqueues a new task.
@@ -75,19 +101,38 @@ func (s *Scheduler) SubmitTask(ctx context.Context, task *types.Task) error {
 	task.CreatedAt = now
 	task.UpdatedAt = now
 
+	// Rate limit check: reject early if queue is being flooded
+	qCfg := s.getQueueConfig(task.QueueName)
+	if qCfg != nil && qCfg.RateLimit > 0 {
+		if !s.limiter.Allow(task.QueueName) {
+			return ErrQueueRateLimited
+		}
+	}
+
 	// Persist to durable store
 	if err := s.taskStore.Create(ctx, task); err != nil {
 		return fmt.Errorf("persist task: %w", err)
 	}
 
-	// Enqueue to fast-path broker
+	// Enqueue to fast-path broker with capacity check
+	var maxSize int64
+	if qCfg != nil {
+		maxSize = qCfg.MaxSize
+	}
+
 	if task.ScheduleAt != nil || task.Delay.Duration > 0 {
 		if err := s.broker.EnqueueDelayed(ctx, task.QueueName, task); err != nil {
 			return fmt.Errorf("enqueue delayed: %w", err)
 		}
 	} else {
-		if err := s.broker.Enqueue(ctx, task.QueueName, task); err != nil {
-			return fmt.Errorf("enqueue: %w", err)
+		if redisBroker, ok := s.broker.(*redisqueue.QueueBroker); ok && maxSize > 0 {
+			if err := redisBroker.EnqueueWithCap(ctx, task.QueueName, task, maxSize); err != nil {
+				return fmt.Errorf("enqueue: %w", err)
+			}
+		} else {
+			if err := s.broker.Enqueue(ctx, task.QueueName, task); err != nil {
+				return fmt.Errorf("enqueue: %w", err)
+			}
 		}
 	}
 

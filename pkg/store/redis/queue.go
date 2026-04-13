@@ -37,19 +37,56 @@ func delayedKeyFor(queue string) string  { return fmt.Sprintf(delayedKey, queue)
 func inflightKeyFor(queue string) string { return fmt.Sprintf(inflightKey, queue) }
 func statsKeyFor(queue string) string    { return fmt.Sprintf(statsKey, queue) }
 
+// ErrQueueFull is returned when the queue has reached its maximum capacity.
+var ErrQueueFull = fmt.Errorf("queue is full")
+
+// enqueueWithCapScript atomically checks queue length and enqueues only if under the limit.
+// KEYS[1] = ready key, KEYS[2] = stats key
+// ARGV[1] = score, ARGV[2] = task data, ARGV[3] = max size (0 = unlimited)
+var enqueueWithCapScript = redis.NewScript(`
+local ready_key = KEYS[1]
+local stats_key = KEYS[2]
+local score = tonumber(ARGV[1])
+local data = ARGV[2]
+local max_size = tonumber(ARGV[3])
+if max_size > 0 then
+    local current = redis.call('ZCARD', ready_key)
+    if current >= max_size then
+        return -1
+    end
+end
+redis.call('ZADD', ready_key, score, data)
+redis.call('HINCRBY', stats_key, 'enqueued', 1)
+return 0
+`)
+
 // Enqueue adds a task to the ready queue using priority as score.
+// If maxSize > 0, it atomically checks the queue length before enqueuing
+// and returns ErrQueueFull if the capacity limit is reached.
 func (q *QueueBroker) Enqueue(ctx context.Context, queue string, task *types.Task) error {
+	return q.EnqueueWithCap(ctx, queue, task, 0)
+}
+
+// EnqueueWithCap adds a task to the ready queue with an optional capacity limit.
+// maxSize=0 means unlimited.
+func (q *QueueBroker) EnqueueWithCap(ctx context.Context, queue string, task *types.Task, maxSize int64) error {
 	data, err := json.Marshal(task)
 	if err != nil {
 		return fmt.Errorf("marshal task: %w", err)
 	}
-	// Use negative priority so higher priority = lower score = dequeued first by ZPOPMIN
 	score := float64(-task.Priority)
-	pipe := q.client.Pipeline()
-	pipe.ZAdd(ctx, readyKeyFor(queue), redis.Z{Score: score, Member: string(data)})
-	pipe.HIncrBy(ctx, statsKeyFor(queue), "enqueued", 1)
-	_, err = pipe.Exec(ctx)
-	return err
+
+	result, err := enqueueWithCapScript.Run(ctx, q.client,
+		[]string{readyKeyFor(queue), statsKeyFor(queue)},
+		score, string(data), maxSize,
+	).Int64()
+	if err != nil {
+		return fmt.Errorf("enqueue script: %w", err)
+	}
+	if result == -1 {
+		return ErrQueueFull
+	}
+	return nil
 }
 
 // EnqueueDelayed adds a task to the delayed set.
