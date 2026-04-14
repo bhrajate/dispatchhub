@@ -35,9 +35,6 @@ spec:
             - name: http
               containerPort: 8080
               protocol: TCP
-            - name: grpc
-              containerPort: 9090
-              protocol: TCP
             - name: metrics
               containerPort: 9091
               protocol: TCP
@@ -106,9 +103,6 @@ spec:
     - name: http
       port: 8080
       targetPort: http
-    - name: grpc
-      port: 9090
-      targetPort: grpc
   selector:
     app.kubernetes.io/name: dispatchhub
     app.kubernetes.io/component: scheduler

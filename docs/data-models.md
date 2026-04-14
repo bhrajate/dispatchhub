@@ -2,7 +2,7 @@
 
 ## Task（任务）
 
-> 源码：`pkg/types/task.go`
+> 源码：`internal/shared/domain/entity/task.go`
 
 Task 是系统的核心领域对象，代表一个待执行的工作单元。
 
@@ -142,25 +142,6 @@ func (t *Task) CanRetry() bool {
 
 ---
 
-## TaskEvent（任务事件）
-
-> 源码：`pkg/types/task.go`
-
-记录任务生命周期中的每次状态变更，用于审计追踪。
-
-| 字段 | 类型 | 说明 |
-|------|------|------|
-| `ID` | string | 事件唯一 ID |
-| `TaskID` | string | 关联的任务 ID |
-| `Type` | string | 事件类型：created / scheduled / started / completed / failed / retried / cancelled |
-| `OldState` | TaskState | 变更前状态 |
-| `NewState` | TaskState | 变更后状态 |
-| `WorkerID` | string | 触发事件的 Worker |
-| `Message` | string | 事件附加信息 |
-| `Timestamp` | time.Time | 事件发生时间 |
-
----
-
 ## TaskFilter（查询过滤器）
 
 用于 ListTasks 接口的查询条件。
@@ -235,7 +216,7 @@ func (l Labels) Matches(selector map[string]string) bool
 
 ### WorkerInfo（Worker 信息）
 
-> 源码：`pkg/types/worker.go`
+> 源码：`internal/shared/domain/entity/worker.go`
 
 描述一个注册在集群中的 Worker 节点。
 
@@ -314,7 +295,7 @@ Worker 周期性发送给 Scheduler 的状态报告。
 
 ### QueueConfig（队列配置）
 
-> 源码：`pkg/types/queue.go`
+> 源码：`internal/shared/domain/entity/queue.go`
 
 | 字段 | 类型 | 说明 |
 |------|------|------|
@@ -341,12 +322,12 @@ Worker 周期性发送给 Scheduler 的状态报告。
 
 ## 存储接口
 
-### TaskStore
+### TaskRepository
 
-> 源码：`pkg/store/store.go`
+> 源码：`internal/shared/domain/repository/`
 
 ```go
-type TaskStore interface {
+type TaskRepository interface {
     Create(ctx, task)                         error
     Get(ctx, id)                              (*Task, error)
     Update(ctx, task)                         error          // 乐观锁
@@ -371,10 +352,10 @@ type QueueBroker interface {
 }
 ```
 
-### Registry
+### WorkerRegistry
 
 ```go
-type Registry interface {
+type WorkerRegistry interface {
     Register(ctx, worker)              error
     Deregister(ctx, workerID)          error
     Heartbeat(ctx, heartbeat)          error

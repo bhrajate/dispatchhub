@@ -25,10 +25,6 @@ scheduler:
     grpcPort: 9090
   config:
     leaseDuration: 15s
-    renewInterval: 5s
-    scheduleInterval: 100ms
-    maxBatchSize: 100
-    virtualNodes: 150
 
 worker:
   enabled: true

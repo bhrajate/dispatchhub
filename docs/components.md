@@ -2,34 +2,143 @@
 
 ## 概览
 
-DispatchHub 由三个可独立部署的二进制组件和三层基础设施组成：
+DispatchHub 由三个可独立部署的二进制组件和三层基础设施组成，采用 **DDD（领域驱动设计）** 分层架构：
 
-| 组件 | 二进制 | 职责 |
-|------|--------|------|
-| Scheduler | `cmd/scheduler` | 任务调度控制面 |
-| Worker | `cmd/worker` | 任务执行数据面 |
-| API Server | `cmd/apiserver` | 无状态 API 网关 |
+| 组件 | 二进制 | 职责 | 对外 API |
+|------|--------|------|----------|
+| API Server | `cmd/apiserver` | 无状态 API 网关，**系统唯一外部入口** | HTTP REST + gRPC + healthz/readyz/metrics |
+| Scheduler | `cmd/scheduler` | 任务调度控制面 | 仅 healthz/readyz/metrics（运维端点） |
+| Worker | `cmd/worker` | 任务执行数据面 | 仅 healthz/readyz/metrics（运维端点） |
+
+## DDD 分层架构
+
+项目按**服务优先 + DDD 四层**组织，每个服务在 `internal/` 下有独立目录，通过 `shared/` 共享领域模型和基础设施：
+
+```
+internal/
+  shared/                              # 跨服务共享
+    domain/
+      entity/                          # 实体 & 值对象 (Task, Worker, Queue)
+      repository/                      # 仓储接口 (TaskRepository, QueueBroker, WorkerRegistry)
+      service/                         # 服务接口 (TaskService) + 基础实现 (TaskServiceImpl)
+    infrastructure/
+      config/                          # 配置管理
+      version/                         # 版本信息
+      persistence/{mysql,redis,etcd}/  # 仓储实现
+
+  apiserver/                           # API Server 服务
+    interfaces/{http,grpc}/            # HTTP REST + gRPC 接口
+
+  scheduler/                           # Scheduler 服务
+    domain/service/                    # 调度领域服务 (SchedulerService)
+    application/                       # 应用编排 (reconciliation loops)
+    infrastructure/election/           # etcd Leader 选举
+
+  worker/                              # Worker 服务
+    application/service/               # Worker 执行引擎 (WorkerAppService)
+    interfaces/middleware/             # 中间件 (Recovery/Logging/Timeout)
+```
+
+**依赖规则**：
+- `cmd/apiserver` → `internal/apiserver` + `internal/shared`
+- `cmd/scheduler` → `internal/scheduler` + `internal/shared`
+- `cmd/worker` → `internal/worker` + `internal/shared`
+- **三个服务之间零交叉引用**
+- **domain 层零基础设施依赖**（日志/指标通过 hook 在 application 层注入）
+
+---
+
+## API Server（接入网关）
+
+> 源码：`cmd/apiserver/main.go`、`internal/apiserver/interfaces/grpc/server.go`、`internal/apiserver/interfaces/http/server.go`
+
+### 职责
+
+1. **系统唯一的外部入口**，对外提供 HTTP REST 和 gRPC 两种 API
+2. 暴露 Prometheus 指标端点和健康检查
+3. 通过 `shared/domain/service/TaskServiceImpl` 处理任务管理请求
+
+### 特点
+
+- **无状态**：不参与 Leader 选举，不运行调度循环
+- **可水平扩展**：部署任意数量副本，前面放 LoadBalancer/Ingress
+- **与 Scheduler 解耦**：依赖 `shared/domain/service` 中的 `TaskService` 接口和 `TaskServiceImpl` 实现，不引用 Scheduler 任何代码
+
+### SubmitTask 流程
+
+> 源码：`internal/shared/domain/service/task_service_impl.go`
+
+```go
+func (s *TaskServiceImpl) SubmitTask(ctx context.Context, task *entity.Task) error
+```
+
+1. **设置默认值**：ID（UUID）、QueueName（"default"）、Priority（5）、MaxRetries（3）、Timeout（5m）
+2. **设置状态**：State = Pending，CreatedAt/UpdatedAt = now
+3. **持久化**：`taskRepo.Create(ctx, task)` → MySQL INSERT
+4. **入队**：根据是否有 Delay/ScheduleAt 选择 `Enqueue` 或 `EnqueueDelayed`
+5. **回调**：通过 `TaskSubmittedHook` 在 application 层执行日志记录和指标递增（domain 层本身不依赖 log/metrics）
+
+### gRPC Server
+
+拦截器链：
+
+| 拦截器 | 功能 |
+|--------|------|
+| `grpc_prometheus.UnaryServerInterceptor` | Prometheus 请求指标 |
+| `grpc_recovery.UnaryServerInterceptor` | Panic 恢复 |
+| `loggingUnaryInterceptor` | 请求日志（方法、状态码、耗时） |
+
+Keepalive 配置：
+
+| 参数 | 值 | 含义 |
+|------|-----|------|
+| MaxConnectionIdle | 5m | 空闲连接最大存活时间 |
+| MaxConnectionAge | 30m | 连接最大存活时间 |
+| Time | 10s | Keepalive ping 间隔 |
+| Timeout | 3s | Ping 响应超时 |
+| MaxRecvMsgSize | 16MB | 最大接收消息大小 |
+
+附加服务：Health Check、Reflection（开发调试）、Prometheus 指标导出。
+
+### HTTP Server
+
+超时配置：
+
+| 参数 | 值 |
+|------|-----|
+| ReadTimeout | 10s |
+| WriteTimeout | 30s |
+| IdleTimeout | 60s |
 
 ---
 
 ## Scheduler（调度器）
 
-> 源码：`pkg/scheduler/scheduler.go`、`pkg/election/election.go`
+> 源码：`internal/scheduler/domain/service/scheduler.go`、`internal/scheduler/application/scheduler_app_service.go`、`internal/scheduler/infrastructure/election/election.go`
 
 ### 职责
 
-1. 接收任务提交请求，设置默认值后持久化到 MySQL，入队到 Redis
-2. 周期性晋升延迟队列中到期的任务到就绪队列
-3. 监控 Worker 拓扑变化（注册/注销），维护一致性哈希环
+1. 周期性晋升延迟队列中到期的任务到就绪队列
+2. 补偿扫描 MySQL 中的孤儿 Pending 任务（MySQL 写成功但 Redis 入队失败），重新入队
+3. 监控 Worker 拓扑变化（注册/注销）
 4. 健康检查，摘除超过 30s 无心跳的 Worker
 5. 定期发布队列深度等 Prometheus 指标
+6. 仅暴露运维端点（`/healthz`、`/readyz`、`/metrics`），**不对外暴露任务管理 API**
+
+### DDD 分层
+
+| 层 | 文件 | 职责 |
+|----|------|------|
+| domain | `scheduler.go` | 纯调度业务逻辑：Worker 拓扑管理、孤儿任务补偿，零基础设施依赖 |
+| application | `scheduler_app_service.go` | reconciliation loops 编排，日志/指标注入（通过 hook） |
+| infrastructure | `election/election.go` | etcd Leader 选举实现 |
 
 ### Leader 选举
 
 Scheduler 通过 etcd 实现 Leader 选举，**同一时刻只有一个 Leader 运行调度循环**。
 
 ```go
-// pkg/election/election.go
+// internal/scheduler/infrastructure/election/election.go
 type Config struct {
     Client           *clientv3.Client
     ElectionPrefix   string                    // "/dispatchhub/scheduler/leader"
@@ -58,49 +167,25 @@ Scheduler Leader 启动后并发运行以下循环：
 | `promoteDelayedLoop` | 1s | 扫描延迟队列，将到期任务移入就绪队列 |
 | `healthCheckLoop` | 10s | 检测 Worker 心跳，摘除超时节点 |
 | `metricsLoop` | 5s | 采集队列深度指标发布到 Prometheus |
-| `watchWorkers` | 事件驱动 | Watch etcd Worker 变更事件，更新哈希环 |
+| `watchWorkers` | 事件驱动 | Watch etcd Worker 变更事件，更新 Worker 列表 |
+| `compensateLoop` | 30s | 扫描 MySQL 孤儿 Pending 任务，安全重新入队 |
 
-### SubmitTask 流程
+### SchedulerService 方法
 
-```go
-func (s *Scheduler) SubmitTask(ctx context.Context, task *types.Task) error
 ```
-
-1. **设置默认值**：ID（UUID）、QueueName（"default"）、Priority（5）、MaxRetries（3）、Timeout（5m）
-2. **设置状态**：State = Pending，CreatedAt/UpdatedAt = now
-3. **持久化**：`taskStore.Create(ctx, task)` → MySQL INSERT
-4. **入队**：根据是否有 Delay/ScheduleAt 选择 `Enqueue` 或 `EnqueueDelayed`
-5. **指标**：递增 `tasks_submitted_total` 计数器
-
-### 一致性哈希
-
-> 源码：`pkg/hash/consistent.go`
-
-用于确定任务由哪个 Worker 处理（可用于亲和性调度）。
-
-```go
-type ConsistentHash struct {
-    ring         []uint32          // 排序的哈希值数组
-    nodes        map[uint32]string // 哈希值 → Worker ID
-    members      map[string]bool   // Worker 集合
-    virtualNodes int               // 虚拟节点数, 默认 150
-}
+SchedulerService
+  ├── CompensateOrphanedTasks()  # 扫描+重新入队孤儿任务（原子检查 inflight）
+  ├── SyncWorkers()              # 从 etcd 刷新 Worker 列表
+  ├── HandleWorkerEvent()        # 处理 Worker 加入/离开/更新
+  ├── DetectStaleWorkers()       # 检测心跳超时的 Worker
+  └── Queues()/Broker()/Registry()
 ```
-
-| 方法 | 功能 |
-|------|------|
-| `Add(nodeID)` | 添加节点，生成 N 个虚拟节点哈希 |
-| `Remove(nodeID)` | 移除节点及其虚拟节点 |
-| `Get(key)` | 二分查找找到顺时针方向最近的节点，O(log n) |
-| `GetN(key, n)` | 返回最近的 N 个不同物理节点（用于副本/容错） |
-
-哈希算法：`crc32.ChecksumIEEE([]byte(nodeID + "#" + virtualIndex))`
 
 ---
 
 ## Worker（工作节点）
 
-> 源码：`pkg/worker/worker.go`
+> 源码：`internal/worker/application/service/worker_app_service.go`、`internal/worker/interfaces/middleware/middleware.go`
 
 ### 职责
 
@@ -109,19 +194,20 @@ type ConsistentHash struct {
 3. 定期发送心跳（CPU、内存、活跃任务数）
 4. 处理结果上报：成功 → Ack；失败 → Nack（重试或标记失败）
 5. 收到停机信号后进入 Draining 模式，等待 in-flight 任务完成
+6. 仅暴露运维端点（`/healthz`、`/readyz`、`/metrics`），**不对外暴露任务管理 API**
 
 ### Handler 注册
 
 ```go
 // 接口方式
 type Handler interface {
-    Handle(ctx context.Context, task *types.Task) *types.TaskResult
+    Handle(ctx context.Context, task *entity.Task) *entity.TaskResult
 }
 
 // 函数方式
-w.RegisterFunc("email.send", func(ctx context.Context, task *types.Task) *types.TaskResult {
+w.RegisterFunc("email.send", func(ctx context.Context, task *entity.Task) *entity.TaskResult {
     // 业务逻辑
-    return &types.TaskResult{Output: "sent"}
+    return &entity.TaskResult{Output: "sent"}
 })
 ```
 
@@ -140,9 +226,9 @@ w.Use(
 
 | 中间件 | 功能 | 源码 |
 |--------|------|------|
-| `Recovery` | 捕获 Handler Panic，转为 TaskResult.Error | `pkg/middleware/middleware.go` |
-| `Logging` | 记录任务开始/结束时间、耗时、结果 | `pkg/middleware/middleware.go` |
-| `Timeout` | 基于 context.WithTimeout 的执行超时控制 | `pkg/middleware/middleware.go` |
+| `Recovery` | 捕获 Handler Panic，转为 TaskResult.Error | `internal/worker/interfaces/middleware/middleware.go` |
+| `Logging` | 记录任务开始/结束时间、耗时、结果 | `internal/worker/interfaces/middleware/middleware.go` |
+| `Timeout` | 基于 context.WithTimeout 的执行超时控制 | `internal/worker/interfaces/middleware/middleware.go` |
 
 ### 背压机制
 
@@ -204,71 +290,21 @@ type Heartbeat struct {
 
 ---
 
-## API Server（接入网关）
-
-> 源码：`cmd/apiserver/main.go`、`pkg/api/grpc/server.go`、`pkg/api/http/server.go`
-
-### 职责
-
-1. 对外提供 HTTP REST 和 gRPC 两种 API
-2. 暴露 Prometheus 指标端点和健康检查
-3. 转发请求到 Scheduler 逻辑层
-
-### 特点
-
-- **无状态**：不参与 Leader 选举，不运行调度循环
-- **可水平扩展**：部署任意数量副本，前面放 LoadBalancer/Ingress
-- **与 Scheduler 共用代码**：内部通过 Scheduler 结构体直接调用存储层
-
-### gRPC Server
-
-拦截器链：
-
-| 拦截器 | 功能 |
-|--------|------|
-| `grpc_prometheus.UnaryServerInterceptor` | Prometheus 请求指标 |
-| `grpc_recovery.UnaryServerInterceptor` | Panic 恢复 |
-| `loggingUnaryInterceptor` | 请求日志（方法、状态码、耗时） |
-
-Keepalive 配置：
-
-| 参数 | 值 | 含义 |
-|------|-----|------|
-| MaxConnectionIdle | 5m | 空闲连接最大存活时间 |
-| MaxConnectionAge | 30m | 连接最大存活时间 |
-| Time | 10s | Keepalive ping 间隔 |
-| Timeout | 3s | Ping 响应超时 |
-| MaxRecvMsgSize | 16MB | 最大接收消息大小 |
-
-附加服务：Health Check、Reflection（开发调试）、Prometheus 指标导出。
-
-### HTTP Server
-
-超时配置：
-
-| 参数 | 值 |
-|------|-----|
-| ReadTimeout | 10s |
-| WriteTimeout | 30s |
-| IdleTimeout | 60s |
-
----
-
 ## 存储层
 
 ### Redis（快速队列）
 
-> 源码：`pkg/store/redis/queue.go`
+> 源码：`internal/shared/infrastructure/persistence/redis/queue_broker.go`
 
-实现 `store.QueueBroker` 接口，使用 Sorted Set 作为优先级队列。
+实现 `repository.QueueBroker` 接口，使用 Sorted Set 作为优先级队列。
 
 详见 [队列设计](queue-design.md)。
 
 ### etcd（协调层）
 
-> 源码：`pkg/store/etcd/registry.go`
+> 源码：`internal/shared/infrastructure/persistence/etcd/worker_registry.go`
 
-实现 `store.Registry` 接口，提供 Worker 服务注册与发现。
+实现 `repository.WorkerRegistry` 接口，提供 Worker 服务注册与发现。
 
 | 功能 | etcd 机制 |
 |------|-----------|
@@ -283,9 +319,9 @@ Key 结构：`/dispatchhub/workers/{workerID}` → JSON(WorkerInfo)
 
 ### MySQL（持久层）
 
-> 源码：`pkg/store/mysql/task_store.go`
+> 源码：`internal/shared/infrastructure/persistence/mysql/task_repository.go`
 
-实现 `store.TaskStore` 和 `store.TaskEventStore` 接口。
+实现 `repository.TaskRepository` 接口。
 
 | 功能 | 实现 |
 |------|------|
@@ -313,12 +349,6 @@ Key 结构：`/dispatchhub/workers/{workerID}` → JSON(WorkerInfo)
 预定义指标覆盖 Scheduler（提交数、调度延迟）、Worker（处理数、执行耗时、活跃数）、Queue（队列深度）。
 
 详见 [配置参考](configuration.md) 中的指标列表。
-
-### retry（重试策略）
-
-> 源码：`pkg/retry/retry.go`
-
-指数退避 + 25% 随机抖动，可配置基础间隔、最大间隔、乘数因子。
 
 ### ratelimit（限流器）
 

@@ -277,7 +277,7 @@ WHERE lock_name = 'leader' AND (expires_at < NOW() OR holder = 'scheduler-abc');
 
 ## Redis 数据结构设计
 
-> 源码：`pkg/store/redis/queue.go`
+> 源码：`internal/shared/infrastructure/persistence/redis/queue_broker.go`
 
 ### Key 命名规范
 
@@ -335,7 +335,7 @@ dispatchhub:queue:{queue_name}:{type}
 
 ## etcd 数据结构设计
 
-> 源码：`pkg/store/etcd/registry.go`、`pkg/election/election.go`
+> 源码：`internal/shared/infrastructure/persistence/etcd/worker_registry.go`、`internal/scheduler/infrastructure/election/election.go`
 
 ### Key 空间
 
@@ -380,8 +380,8 @@ etcd 建议总数据量 < 2GB，DispatchHub 的使用量远低于此限制。
 ### 乐观锁（MySQL tasks 表）
 
 ```go
-// pkg/store/mysql/task_store.go
-func (s *TaskStore) Update(ctx context.Context, task *types.Task) error {
+// internal/shared/infrastructure/persistence/mysql/task_repository.go
+func (s *TaskRepository) Update(ctx context.Context, task *entity.Task) error {
     oldVersion := task.Version
     task.Version++
 
@@ -546,7 +546,7 @@ ALTER TABLE tasks PARTITION BY RANGE (TO_DAYS(created_at)) (
 
 ## 存储接口抽象
 
-> 源码：`pkg/store/store.go`
+> 源码：`internal/shared/domain/repository/`
 
 所有存储操作通过接口抽象，方便替换实现：
 

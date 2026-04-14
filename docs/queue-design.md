@@ -12,7 +12,7 @@ DispatchHub 的队列系统基于 Redis 实现，支持以下能力：
 
 ## Redis 数据结构
 
-> 源码：`pkg/store/redis/queue.go`
+> 源码：`internal/shared/infrastructure/persistence/redis/queue_broker.go`
 
 每个队列使用 4 个 Redis Key：
 

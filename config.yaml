@@ -4,10 +4,6 @@ server:
 
 scheduler:
   lease_duration: 15s
-  renew_interval: 5s
-  schedule_interval: 100ms
-  max_batch_size: 100
-  virtual_nodes: 150
 
 worker:
   queues:
