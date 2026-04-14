@@ -43,22 +43,15 @@ server:
 | 字段 | 类型 | 默认值 | 说明 |
 |------|------|--------|------|
 | `lease_duration` | duration | `15s` | Leader Lease 有效期 |
-| `renew_interval` | duration | `5s` | Lease 续约间隔 |
-| `schedule_interval` | duration | `100ms` | 调度主循环 tick 间隔 |
-| `max_batch_size` | int | `100` | 每次调度循环最大处理任务数 |
 
 ```yaml
 scheduler:
   lease_duration: 15s
-  renew_interval: 5s
-  schedule_interval: 100ms
-  max_batch_size: 100
 ```
 
 **调优建议**：
 
 - `lease_duration`：越小故障切换越快，但对 etcd 压力越大。推荐 10s~30s
-- `schedule_interval`：越小延迟越低，但 CPU 消耗越高。推荐 50ms~500ms
 
 ---
 
@@ -265,9 +258,6 @@ server:
 
 scheduler:
   lease_duration: 15s
-  renew_interval: 5s
-  schedule_interval: 100ms
-  max_batch_size: 100
 
 worker:
   queues:

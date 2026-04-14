@@ -100,9 +100,7 @@ CREATE TABLE `tasks` (
     `priority`      TINYINT       DEFAULT 5,     -- 1~10
     `delay`         BIGINT        DEFAULT 0,     -- 纳秒
     `schedule_at`   DATETIME(3),
-    `cron_expr`     VARCHAR(128)  DEFAULT '',
     `timeout`       BIGINT        DEFAULT 0,     -- 纳秒
-    `deadline`      DATETIME(3),
     `max_retries`   INT           DEFAULT 3,
     `retry_count`   INT           DEFAULT 0,
     `retry_backoff` BIGINT        DEFAULT 0,     -- 纳秒
@@ -552,13 +550,12 @@ ALTER TABLE tasks PARTITION BY RANGE (TO_DAYS(created_at)) (
 
 ```go
 // 持久化 (MySQL)
-type TaskStore interface {
+type TaskRepository interface {
     Create(ctx, task) error
     Get(ctx, id) (*Task, error)
     Update(ctx, task) error              // 乐观锁
     Delete(ctx, id) error
     List(ctx, filter) ([]*Task, int64, error)
-    BatchUpdateState(ctx, ids, from, to) (int64, error)
 }
 
 // 快速队列 (Redis)
@@ -574,7 +571,7 @@ type QueueBroker interface {
 }
 
 // 服务注册 (etcd)
-type Registry interface {
+type WorkerRegistry interface {
     Register(ctx, worker) error          // Lease注册
     Deregister(ctx, workerID) error
     Heartbeat(ctx, heartbeat) error

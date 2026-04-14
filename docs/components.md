@@ -329,7 +329,6 @@ Key 结构：`/dispatchhub/workers/{workerID}` → JSON(WorkerInfo)
 | 更新任务 | 乐观锁：WHERE version = old_version，Version 自增 |
 | 查询任务 | 支持 Namespace/Group/Type/State/Queue/Worker 过滤 |
 | 排序 | priority DESC, created_at ASC |
-| 批量更新 | BatchUpdateState：单 SQL 更新多任务状态 + Version |
 | 自动建表 | AutoMigrate 根据 struct tag 创建表和索引 |
 
 ---
