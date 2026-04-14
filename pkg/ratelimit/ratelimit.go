@@ -9,8 +9,8 @@ import (
 // Limiter implements a sliding-window rate limiter with token bucket semantics.
 type Limiter struct {
 	mu       sync.Mutex
-	rate     float64       // tokens per second
-	burst    int           // max tokens
+	rate     float64 // tokens per second
+	burst    int     // max tokens
 	tokens   float64
 	lastTime time.Time
 }
@@ -64,8 +64,8 @@ func (l *Limiter) refill() {
 
 // MultiQueueLimiter manages per-queue rate limiters.
 type MultiQueueLimiter struct {
-	mu       sync.RWMutex
-	limiters map[string]*Limiter
+	mu           sync.RWMutex
+	limiters     map[string]*Limiter
 	defaultRate  float64
 	defaultBurst int
 }

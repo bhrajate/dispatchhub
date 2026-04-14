@@ -20,6 +20,8 @@ type SchedulerAppConfig struct {
 	CompensateInterval     time.Duration
 	CompensateOlderThan    time.Duration
 	CompensateBatchSize    int
+	CronCheckInterval      time.Duration
+	CronBatchSize          int
 }
 
 // DefaultSchedulerAppConfig returns sensible defaults.
@@ -32,6 +34,8 @@ func DefaultSchedulerAppConfig() SchedulerAppConfig {
 		CompensateInterval:     30 * time.Second,
 		CompensateOlderThan:    30 * time.Second,
 		CompensateBatchSize:    100,
+		CronCheckInterval:      time.Second,
+		CronBatchSize:          100,
 	}
 }
 
@@ -66,6 +70,7 @@ func (s *SchedulerAppService) Run(ctx context.Context) error {
 	go s.healthCheckLoop(ctx)
 	go s.metricsLoop(ctx)
 	go s.compensateLoop(ctx)
+	go s.cronLoop(ctx)
 
 	<-ctx.Done()
 	log.Info("scheduler stopped")
@@ -172,6 +177,26 @@ func (s *SchedulerAppService) compensateLoop(ctx context.Context) {
 				log.Errorf("compensate orphaned tasks: %v", err)
 			} else if n > 0 {
 				log.Infof("compensated %d orphaned tasks", n)
+			}
+		}
+	}
+}
+
+// cronLoop periodically checks for due cron jobs and triggers them.
+func (s *SchedulerAppService) cronLoop(ctx context.Context) {
+	ticker := time.NewTicker(s.cfg.CronCheckInterval)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			n, err := s.domainSvc.TriggerDueCronJobs(ctx, s.cfg.CronBatchSize)
+			if err != nil {
+				log.Errorf("trigger cron jobs: %v", err)
+			} else if n > 0 {
+				log.Infof("triggered %d cron jobs", n)
 			}
 		}
 	}

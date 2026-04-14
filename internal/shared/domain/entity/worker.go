@@ -6,8 +6,8 @@ import "time"
 type WorkerState int
 
 const (
-	WorkerStateOnline  WorkerState = iota
-	WorkerStateDraining            // accepting no new tasks, finishing current
+	WorkerStateOnline   WorkerState = iota
+	WorkerStateDraining             // accepting no new tasks, finishing current
 	WorkerStateOffline
 )
 

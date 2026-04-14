@@ -114,6 +114,13 @@ func (s *TaskRepository) FindStaleByState(ctx context.Context, state entity.Task
 	return tasks, err
 }
 
+func (s *TaskRepository) TouchUpdatedAt(ctx context.Context, id string) error {
+	return s.db.WithContext(ctx).
+		Model(&entity.Task{}).
+		Where("id = ?", id).
+		Update("updated_at", time.Now()).Error
+}
+
 // Verify MySQL TaskRepository satisfies all repository interfaces.
 var (
 	_ repository.TaskReader      = (*TaskRepository)(nil)

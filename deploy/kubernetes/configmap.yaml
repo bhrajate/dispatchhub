@@ -11,6 +11,8 @@ data:
 
     scheduler:
       lease_duration: 15s
+      cron_check_interval: 1s
+      cron_batch_size: 100
 
     worker:
       queues:

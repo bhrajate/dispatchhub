@@ -25,6 +25,8 @@ scheduler:
     grpcPort: 9090
   config:
     leaseDuration: 15s
+    cronCheckInterval: 1s
+    cronBatchSize: 100
 
 worker:
   enabled: true

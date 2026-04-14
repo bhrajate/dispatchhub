@@ -46,10 +46,10 @@ type WorkerConfig struct {
 // WorkerAppService is the data-plane component that fetches tasks,
 // executes handlers, and reports heartbeats.
 type WorkerAppService struct {
-	cfg      WorkerConfig
-	broker      repository.QueueBroker
-	registry    repository.WorkerRegistry
-	taskWriter  repository.TaskWriter
+	cfg        WorkerConfig
+	broker     repository.QueueBroker
+	registry   repository.WorkerRegistry
+	taskWriter repository.TaskWriter
 
 	mu       sync.RWMutex
 	handlers map[string]Handler
@@ -77,12 +77,12 @@ func NewWorkerAppService(
 	}
 
 	return &WorkerAppService{
-		cfg:      cfg,
-		broker:   broker,
-		registry: registry,
+		cfg:        cfg,
+		broker:     broker,
+		registry:   registry,
 		taskWriter: taskWriter,
-		handlers: make(map[string]Handler),
-		sem:      make(chan struct{}, cfg.Concurrency),
+		handlers:   make(map[string]Handler),
+		sem:        make(chan struct{}, cfg.Concurrency),
 	}
 }
 
@@ -106,14 +106,16 @@ func (w *WorkerAppService) Use(mw ...Middleware) {
 // Run starts the worker.
 func (w *WorkerAppService) Run(ctx context.Context) error {
 	hostname, _ := os.Hostname()
+	now := time.Now()
 	w.info = &entity.WorkerInfo{
-		ID:          w.cfg.ID,
-		Hostname:    hostname,
-		Queues:      w.cfg.Queues,
-		Concurrency: w.cfg.Concurrency,
-		State:       entity.WorkerStateOnline,
-		StartedAt:   time.Now(),
-		Version:     "v0.1.0",
+		ID:            w.cfg.ID,
+		Hostname:      hostname,
+		Queues:        w.cfg.Queues,
+		Concurrency:   w.cfg.Concurrency,
+		State:         entity.WorkerStateOnline,
+		StartedAt:     now,
+		LastHeartbeat: now,
+		Version:       "v0.1.0",
 	}
 
 	if err := w.registry.Register(ctx, w.info); err != nil {

@@ -7,7 +7,7 @@ option go_package = "github.com/dispatchhub/dispatchhub/api/proto;dispatchpb";
 import "google/protobuf/timestamp.proto";
 import "google/protobuf/duration.proto";
 
-// DispatchService is the main API for task management.
+// DispatchService is the main API for task and cron job management.
 service DispatchService {
   // Task operations
   rpc SubmitTask(SubmitTaskRequest) returns (SubmitTaskResponse);
@@ -17,6 +17,12 @@ service DispatchService {
 
   // Queue operations
   rpc GetQueueStats(GetQueueStatsRequest) returns (GetQueueStatsResponse);
+
+  // CronJob operations
+  rpc CreateCronJob(CreateCronJobRequest) returns (CreateCronJobResponse);
+  rpc GetCronJob(GetCronJobRequest) returns (GetCronJobResponse);
+  rpc ListCronJobs(ListCronJobsRequest) returns (ListCronJobsResponse);
+  rpc DeleteCronJob(DeleteCronJobRequest) returns (DeleteCronJobResponse);
 }
 
 // --- Task messages ---
@@ -127,3 +133,67 @@ message GetQueueStatsResponse {
   int64 completed = 6;
   int64 failed = 7;
 }
+
+// --- CronJob messages ---
+
+message CronJob {
+  string id = 1;
+  string name = 2;
+  string namespace = 3;
+  string type = 4;
+  bytes payload = 5;
+  map<string, string> labels = 6;
+  string cron_expr = 7;
+  string queue_name = 8;
+  TaskPriority priority = 9;
+  google.protobuf.Duration timeout = 10;
+  int32 max_retries = 11;
+  google.protobuf.Duration retry_backoff = 12;
+  bool enabled = 13;
+  google.protobuf.Timestamp last_run_at = 14;
+  google.protobuf.Timestamp next_run_at = 15;
+  google.protobuf.Timestamp created_at = 16;
+}
+
+message CreateCronJobRequest {
+  string name = 1;
+  string namespace = 2;
+  string type = 3;
+  bytes payload = 4;
+  map<string, string> labels = 5;
+  string cron_expr = 6;
+  string queue_name = 7;
+  TaskPriority priority = 8;
+  google.protobuf.Duration timeout = 9;
+  int32 max_retries = 10;
+  google.protobuf.Duration retry_backoff = 11;
+}
+
+message CreateCronJobResponse {
+  CronJob cron_job = 1;
+}
+
+message GetCronJobRequest {
+  string id = 1;
+}
+
+message GetCronJobResponse {
+  CronJob cron_job = 1;
+}
+
+message ListCronJobsRequest {
+  string namespace = 1;
+  int32 limit = 2;
+  int32 offset = 3;
+}
+
+message ListCronJobsResponse {
+  repeated CronJob cron_jobs = 1;
+  int64 total = 2;
+}
+
+message DeleteCronJobRequest {
+  string id = 1;
+}
+
+message DeleteCronJobResponse {}

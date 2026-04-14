@@ -969,6 +969,618 @@ func (x *GetQueueStatsResponse) GetFailed() int64 {
 	return 0
 }
 
+type CronJob struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Id            string                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
+	Name          string                 `protobuf:"bytes,2,opt,name=name,proto3" json:"name,omitempty"`
+	Namespace     string                 `protobuf:"bytes,3,opt,name=namespace,proto3" json:"namespace,omitempty"`
+	Type          string                 `protobuf:"bytes,4,opt,name=type,proto3" json:"type,omitempty"`
+	Payload       []byte                 `protobuf:"bytes,5,opt,name=payload,proto3" json:"payload,omitempty"`
+	Labels        map[string]string      `protobuf:"bytes,6,rep,name=labels,proto3" json:"labels,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
+	CronExpr      string                 `protobuf:"bytes,7,opt,name=cron_expr,json=cronExpr,proto3" json:"cron_expr,omitempty"`
+	QueueName     string                 `protobuf:"bytes,8,opt,name=queue_name,json=queueName,proto3" json:"queue_name,omitempty"`
+	Priority      TaskPriority           `protobuf:"varint,9,opt,name=priority,proto3,enum=dispatch.v1.TaskPriority" json:"priority,omitempty"`
+	Timeout       *durationpb.Duration   `protobuf:"bytes,10,opt,name=timeout,proto3" json:"timeout,omitempty"`
+	MaxRetries    int32                  `protobuf:"varint,11,opt,name=max_retries,json=maxRetries,proto3" json:"max_retries,omitempty"`
+	RetryBackoff  *durationpb.Duration   `protobuf:"bytes,12,opt,name=retry_backoff,json=retryBackoff,proto3" json:"retry_backoff,omitempty"`
+	Enabled       bool                   `protobuf:"varint,13,opt,name=enabled,proto3" json:"enabled,omitempty"`
+	LastRunAt     *timestamppb.Timestamp `protobuf:"bytes,14,opt,name=last_run_at,json=lastRunAt,proto3" json:"last_run_at,omitempty"`
+	NextRunAt     *timestamppb.Timestamp `protobuf:"bytes,15,opt,name=next_run_at,json=nextRunAt,proto3" json:"next_run_at,omitempty"`
+	CreatedAt     *timestamppb.Timestamp `protobuf:"bytes,16,opt,name=created_at,json=createdAt,proto3" json:"created_at,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *CronJob) Reset() {
+	*x = CronJob{}
+	mi := &file_api_proto_dispatch_proto_msgTypes[12]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *CronJob) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*CronJob) ProtoMessage() {}
+
+func (x *CronJob) ProtoReflect() protoreflect.Message {
+	mi := &file_api_proto_dispatch_proto_msgTypes[12]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use CronJob.ProtoReflect.Descriptor instead.
+func (*CronJob) Descriptor() ([]byte, []int) {
+	return file_api_proto_dispatch_proto_rawDescGZIP(), []int{12}
+}
+
+func (x *CronJob) GetId() string {
+	if x != nil {
+		return x.Id
+	}
+	return ""
+}
+
+func (x *CronJob) GetName() string {
+	if x != nil {
+		return x.Name
+	}
+	return ""
+}
+
+func (x *CronJob) GetNamespace() string {
+	if x != nil {
+		return x.Namespace
+	}
+	return ""
+}
+
+func (x *CronJob) GetType() string {
+	if x != nil {
+		return x.Type
+	}
+	return ""
+}
+
+func (x *CronJob) GetPayload() []byte {
+	if x != nil {
+		return x.Payload
+	}
+	return nil
+}
+
+func (x *CronJob) GetLabels() map[string]string {
+	if x != nil {
+		return x.Labels
+	}
+	return nil
+}
+
+func (x *CronJob) GetCronExpr() string {
+	if x != nil {
+		return x.CronExpr
+	}
+	return ""
+}
+
+func (x *CronJob) GetQueueName() string {
+	if x != nil {
+		return x.QueueName
+	}
+	return ""
+}
+
+func (x *CronJob) GetPriority() TaskPriority {
+	if x != nil {
+		return x.Priority
+	}
+	return TaskPriority_TASK_PRIORITY_UNSPECIFIED
+}
+
+func (x *CronJob) GetTimeout() *durationpb.Duration {
+	if x != nil {
+		return x.Timeout
+	}
+	return nil
+}
+
+func (x *CronJob) GetMaxRetries() int32 {
+	if x != nil {
+		return x.MaxRetries
+	}
+	return 0
+}
+
+func (x *CronJob) GetRetryBackoff() *durationpb.Duration {
+	if x != nil {
+		return x.RetryBackoff
+	}
+	return nil
+}
+
+func (x *CronJob) GetEnabled() bool {
+	if x != nil {
+		return x.Enabled
+	}
+	return false
+}
+
+func (x *CronJob) GetLastRunAt() *timestamppb.Timestamp {
+	if x != nil {
+		return x.LastRunAt
+	}
+	return nil
+}
+
+func (x *CronJob) GetNextRunAt() *timestamppb.Timestamp {
+	if x != nil {
+		return x.NextRunAt
+	}
+	return nil
+}
+
+func (x *CronJob) GetCreatedAt() *timestamppb.Timestamp {
+	if x != nil {
+		return x.CreatedAt
+	}
+	return nil
+}
+
+type CreateCronJobRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Name          string                 `protobuf:"bytes,1,opt,name=name,proto3" json:"name,omitempty"`
+	Namespace     string                 `protobuf:"bytes,2,opt,name=namespace,proto3" json:"namespace,omitempty"`
+	Type          string                 `protobuf:"bytes,3,opt,name=type,proto3" json:"type,omitempty"`
+	Payload       []byte                 `protobuf:"bytes,4,opt,name=payload,proto3" json:"payload,omitempty"`
+	Labels        map[string]string      `protobuf:"bytes,5,rep,name=labels,proto3" json:"labels,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
+	CronExpr      string                 `protobuf:"bytes,6,opt,name=cron_expr,json=cronExpr,proto3" json:"cron_expr,omitempty"`
+	QueueName     string                 `protobuf:"bytes,7,opt,name=queue_name,json=queueName,proto3" json:"queue_name,omitempty"`
+	Priority      TaskPriority           `protobuf:"varint,8,opt,name=priority,proto3,enum=dispatch.v1.TaskPriority" json:"priority,omitempty"`
+	Timeout       *durationpb.Duration   `protobuf:"bytes,9,opt,name=timeout,proto3" json:"timeout,omitempty"`
+	MaxRetries    int32                  `protobuf:"varint,10,opt,name=max_retries,json=maxRetries,proto3" json:"max_retries,omitempty"`
+	RetryBackoff  *durationpb.Duration   `protobuf:"bytes,11,opt,name=retry_backoff,json=retryBackoff,proto3" json:"retry_backoff,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *CreateCronJobRequest) Reset() {
+	*x = CreateCronJobRequest{}
+	mi := &file_api_proto_dispatch_proto_msgTypes[13]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *CreateCronJobRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*CreateCronJobRequest) ProtoMessage() {}
+
+func (x *CreateCronJobRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_api_proto_dispatch_proto_msgTypes[13]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use CreateCronJobRequest.ProtoReflect.Descriptor instead.
+func (*CreateCronJobRequest) Descriptor() ([]byte, []int) {
+	return file_api_proto_dispatch_proto_rawDescGZIP(), []int{13}
+}
+
+func (x *CreateCronJobRequest) GetName() string {
+	if x != nil {
+		return x.Name
+	}
+	return ""
+}
+
+func (x *CreateCronJobRequest) GetNamespace() string {
+	if x != nil {
+		return x.Namespace
+	}
+	return ""
+}
+
+func (x *CreateCronJobRequest) GetType() string {
+	if x != nil {
+		return x.Type
+	}
+	return ""
+}
+
+func (x *CreateCronJobRequest) GetPayload() []byte {
+	if x != nil {
+		return x.Payload
+	}
+	return nil
+}
+
+func (x *CreateCronJobRequest) GetLabels() map[string]string {
+	if x != nil {
+		return x.Labels
+	}
+	return nil
+}
+
+func (x *CreateCronJobRequest) GetCronExpr() string {
+	if x != nil {
+		return x.CronExpr
+	}
+	return ""
+}
+
+func (x *CreateCronJobRequest) GetQueueName() string {
+	if x != nil {
+		return x.QueueName
+	}
+	return ""
+}
+
+func (x *CreateCronJobRequest) GetPriority() TaskPriority {
+	if x != nil {
+		return x.Priority
+	}
+	return TaskPriority_TASK_PRIORITY_UNSPECIFIED
+}
+
+func (x *CreateCronJobRequest) GetTimeout() *durationpb.Duration {
+	if x != nil {
+		return x.Timeout
+	}
+	return nil
+}
+
+func (x *CreateCronJobRequest) GetMaxRetries() int32 {
+	if x != nil {
+		return x.MaxRetries
+	}
+	return 0
+}
+
+func (x *CreateCronJobRequest) GetRetryBackoff() *durationpb.Duration {
+	if x != nil {
+		return x.RetryBackoff
+	}
+	return nil
+}
+
+type CreateCronJobResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	CronJob       *CronJob               `protobuf:"bytes,1,opt,name=cron_job,json=cronJob,proto3" json:"cron_job,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *CreateCronJobResponse) Reset() {
+	*x = CreateCronJobResponse{}
+	mi := &file_api_proto_dispatch_proto_msgTypes[14]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *CreateCronJobResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*CreateCronJobResponse) ProtoMessage() {}
+
+func (x *CreateCronJobResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_api_proto_dispatch_proto_msgTypes[14]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use CreateCronJobResponse.ProtoReflect.Descriptor instead.
+func (*CreateCronJobResponse) Descriptor() ([]byte, []int) {
+	return file_api_proto_dispatch_proto_rawDescGZIP(), []int{14}
+}
+
+func (x *CreateCronJobResponse) GetCronJob() *CronJob {
+	if x != nil {
+		return x.CronJob
+	}
+	return nil
+}
+
+type GetCronJobRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Id            string                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *GetCronJobRequest) Reset() {
+	*x = GetCronJobRequest{}
+	mi := &file_api_proto_dispatch_proto_msgTypes[15]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *GetCronJobRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*GetCronJobRequest) ProtoMessage() {}
+
+func (x *GetCronJobRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_api_proto_dispatch_proto_msgTypes[15]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use GetCronJobRequest.ProtoReflect.Descriptor instead.
+func (*GetCronJobRequest) Descriptor() ([]byte, []int) {
+	return file_api_proto_dispatch_proto_rawDescGZIP(), []int{15}
+}
+
+func (x *GetCronJobRequest) GetId() string {
+	if x != nil {
+		return x.Id
+	}
+	return ""
+}
+
+type GetCronJobResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	CronJob       *CronJob               `protobuf:"bytes,1,opt,name=cron_job,json=cronJob,proto3" json:"cron_job,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *GetCronJobResponse) Reset() {
+	*x = GetCronJobResponse{}
+	mi := &file_api_proto_dispatch_proto_msgTypes[16]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *GetCronJobResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*GetCronJobResponse) ProtoMessage() {}
+
+func (x *GetCronJobResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_api_proto_dispatch_proto_msgTypes[16]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use GetCronJobResponse.ProtoReflect.Descriptor instead.
+func (*GetCronJobResponse) Descriptor() ([]byte, []int) {
+	return file_api_proto_dispatch_proto_rawDescGZIP(), []int{16}
+}
+
+func (x *GetCronJobResponse) GetCronJob() *CronJob {
+	if x != nil {
+		return x.CronJob
+	}
+	return nil
+}
+
+type ListCronJobsRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Namespace     string                 `protobuf:"bytes,1,opt,name=namespace,proto3" json:"namespace,omitempty"`
+	Limit         int32                  `protobuf:"varint,2,opt,name=limit,proto3" json:"limit,omitempty"`
+	Offset        int32                  `protobuf:"varint,3,opt,name=offset,proto3" json:"offset,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ListCronJobsRequest) Reset() {
+	*x = ListCronJobsRequest{}
+	mi := &file_api_proto_dispatch_proto_msgTypes[17]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ListCronJobsRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ListCronJobsRequest) ProtoMessage() {}
+
+func (x *ListCronJobsRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_api_proto_dispatch_proto_msgTypes[17]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ListCronJobsRequest.ProtoReflect.Descriptor instead.
+func (*ListCronJobsRequest) Descriptor() ([]byte, []int) {
+	return file_api_proto_dispatch_proto_rawDescGZIP(), []int{17}
+}
+
+func (x *ListCronJobsRequest) GetNamespace() string {
+	if x != nil {
+		return x.Namespace
+	}
+	return ""
+}
+
+func (x *ListCronJobsRequest) GetLimit() int32 {
+	if x != nil {
+		return x.Limit
+	}
+	return 0
+}
+
+func (x *ListCronJobsRequest) GetOffset() int32 {
+	if x != nil {
+		return x.Offset
+	}
+	return 0
+}
+
+type ListCronJobsResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	CronJobs      []*CronJob             `protobuf:"bytes,1,rep,name=cron_jobs,json=cronJobs,proto3" json:"cron_jobs,omitempty"`
+	Total         int64                  `protobuf:"varint,2,opt,name=total,proto3" json:"total,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ListCronJobsResponse) Reset() {
+	*x = ListCronJobsResponse{}
+	mi := &file_api_proto_dispatch_proto_msgTypes[18]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ListCronJobsResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ListCronJobsResponse) ProtoMessage() {}
+
+func (x *ListCronJobsResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_api_proto_dispatch_proto_msgTypes[18]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ListCronJobsResponse.ProtoReflect.Descriptor instead.
+func (*ListCronJobsResponse) Descriptor() ([]byte, []int) {
+	return file_api_proto_dispatch_proto_rawDescGZIP(), []int{18}
+}
+
+func (x *ListCronJobsResponse) GetCronJobs() []*CronJob {
+	if x != nil {
+		return x.CronJobs
+	}
+	return nil
+}
+
+func (x *ListCronJobsResponse) GetTotal() int64 {
+	if x != nil {
+		return x.Total
+	}
+	return 0
+}
+
+type DeleteCronJobRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Id            string                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *DeleteCronJobRequest) Reset() {
+	*x = DeleteCronJobRequest{}
+	mi := &file_api_proto_dispatch_proto_msgTypes[19]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *DeleteCronJobRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*DeleteCronJobRequest) ProtoMessage() {}
+
+func (x *DeleteCronJobRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_api_proto_dispatch_proto_msgTypes[19]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use DeleteCronJobRequest.ProtoReflect.Descriptor instead.
+func (*DeleteCronJobRequest) Descriptor() ([]byte, []int) {
+	return file_api_proto_dispatch_proto_rawDescGZIP(), []int{19}
+}
+
+func (x *DeleteCronJobRequest) GetId() string {
+	if x != nil {
+		return x.Id
+	}
+	return ""
+}
+
+type DeleteCronJobResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *DeleteCronJobResponse) Reset() {
+	*x = DeleteCronJobResponse{}
+	mi := &file_api_proto_dispatch_proto_msgTypes[20]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *DeleteCronJobResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*DeleteCronJobResponse) ProtoMessage() {}
+
+func (x *DeleteCronJobResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_api_proto_dispatch_proto_msgTypes[20]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use DeleteCronJobResponse.ProtoReflect.Descriptor instead.
+func (*DeleteCronJobResponse) Descriptor() ([]byte, []int) {
+	return file_api_proto_dispatch_proto_rawDescGZIP(), []int{20}
+}
+
 var File_api_proto_dispatch_proto protoreflect.FileDescriptor
 
 const file_api_proto_dispatch_proto_rawDesc = "" +
@@ -1052,7 +1664,65 @@ const file_api_proto_dispatch_proto_rawDesc = "" +
 	"\tscheduled\x18\x04 \x01(\x03R\tscheduled\x12\x1a\n" +
 	"\bretrying\x18\x05 \x01(\x03R\bretrying\x12\x1c\n" +
 	"\tcompleted\x18\x06 \x01(\x03R\tcompleted\x12\x16\n" +
-	"\x06failed\x18\a \x01(\x03R\x06failed*\x93\x01\n" +
+	"\x06failed\x18\a \x01(\x03R\x06failed\"\xc4\x05\n" +
+	"\aCronJob\x12\x0e\n" +
+	"\x02id\x18\x01 \x01(\tR\x02id\x12\x12\n" +
+	"\x04name\x18\x02 \x01(\tR\x04name\x12\x1c\n" +
+	"\tnamespace\x18\x03 \x01(\tR\tnamespace\x12\x12\n" +
+	"\x04type\x18\x04 \x01(\tR\x04type\x12\x18\n" +
+	"\apayload\x18\x05 \x01(\fR\apayload\x128\n" +
+	"\x06labels\x18\x06 \x03(\v2 .dispatch.v1.CronJob.LabelsEntryR\x06labels\x12\x1b\n" +
+	"\tcron_expr\x18\a \x01(\tR\bcronExpr\x12\x1d\n" +
+	"\n" +
+	"queue_name\x18\b \x01(\tR\tqueueName\x125\n" +
+	"\bpriority\x18\t \x01(\x0e2\x19.dispatch.v1.TaskPriorityR\bpriority\x123\n" +
+	"\atimeout\x18\n" +
+	" \x01(\v2\x19.google.protobuf.DurationR\atimeout\x12\x1f\n" +
+	"\vmax_retries\x18\v \x01(\x05R\n" +
+	"maxRetries\x12>\n" +
+	"\rretry_backoff\x18\f \x01(\v2\x19.google.protobuf.DurationR\fretryBackoff\x12\x18\n" +
+	"\aenabled\x18\r \x01(\bR\aenabled\x12:\n" +
+	"\vlast_run_at\x18\x0e \x01(\v2\x1a.google.protobuf.TimestampR\tlastRunAt\x12:\n" +
+	"\vnext_run_at\x18\x0f \x01(\v2\x1a.google.protobuf.TimestampR\tnextRunAt\x129\n" +
+	"\n" +
+	"created_at\x18\x10 \x01(\v2\x1a.google.protobuf.TimestampR\tcreatedAt\x1a9\n" +
+	"\vLabelsEntry\x12\x10\n" +
+	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
+	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\"\x81\x04\n" +
+	"\x14CreateCronJobRequest\x12\x12\n" +
+	"\x04name\x18\x01 \x01(\tR\x04name\x12\x1c\n" +
+	"\tnamespace\x18\x02 \x01(\tR\tnamespace\x12\x12\n" +
+	"\x04type\x18\x03 \x01(\tR\x04type\x12\x18\n" +
+	"\apayload\x18\x04 \x01(\fR\apayload\x12E\n" +
+	"\x06labels\x18\x05 \x03(\v2-.dispatch.v1.CreateCronJobRequest.LabelsEntryR\x06labels\x12\x1b\n" +
+	"\tcron_expr\x18\x06 \x01(\tR\bcronExpr\x12\x1d\n" +
+	"\n" +
+	"queue_name\x18\a \x01(\tR\tqueueName\x125\n" +
+	"\bpriority\x18\b \x01(\x0e2\x19.dispatch.v1.TaskPriorityR\bpriority\x123\n" +
+	"\atimeout\x18\t \x01(\v2\x19.google.protobuf.DurationR\atimeout\x12\x1f\n" +
+	"\vmax_retries\x18\n" +
+	" \x01(\x05R\n" +
+	"maxRetries\x12>\n" +
+	"\rretry_backoff\x18\v \x01(\v2\x19.google.protobuf.DurationR\fretryBackoff\x1a9\n" +
+	"\vLabelsEntry\x12\x10\n" +
+	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
+	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\"H\n" +
+	"\x15CreateCronJobResponse\x12/\n" +
+	"\bcron_job\x18\x01 \x01(\v2\x14.dispatch.v1.CronJobR\acronJob\"#\n" +
+	"\x11GetCronJobRequest\x12\x0e\n" +
+	"\x02id\x18\x01 \x01(\tR\x02id\"E\n" +
+	"\x12GetCronJobResponse\x12/\n" +
+	"\bcron_job\x18\x01 \x01(\v2\x14.dispatch.v1.CronJobR\acronJob\"a\n" +
+	"\x13ListCronJobsRequest\x12\x1c\n" +
+	"\tnamespace\x18\x01 \x01(\tR\tnamespace\x12\x14\n" +
+	"\x05limit\x18\x02 \x01(\x05R\x05limit\x12\x16\n" +
+	"\x06offset\x18\x03 \x01(\x05R\x06offset\"_\n" +
+	"\x14ListCronJobsResponse\x121\n" +
+	"\tcron_jobs\x18\x01 \x03(\v2\x14.dispatch.v1.CronJobR\bcronJobs\x12\x14\n" +
+	"\x05total\x18\x02 \x01(\x03R\x05total\"&\n" +
+	"\x14DeleteCronJobRequest\x12\x0e\n" +
+	"\x02id\x18\x01 \x01(\tR\x02id\"\x17\n" +
+	"\x15DeleteCronJobResponse*\x93\x01\n" +
 	"\fTaskPriority\x12\x1d\n" +
 	"\x19TASK_PRIORITY_UNSPECIFIED\x10\x00\x12\x15\n" +
 	"\x11TASK_PRIORITY_LOW\x10\x01\x12\x19\n" +
@@ -1069,7 +1739,7 @@ const file_api_proto_dispatch_proto_rawDesc = "" +
 	"\x14TASK_STATE_COMPLETED\x10\x05\x12\x15\n" +
 	"\x11TASK_STATE_FAILED\x10\x06\x12\x18\n" +
 	"\x14TASK_STATE_CANCELLED\x10\a\x12\x16\n" +
-	"\x12TASK_STATE_TIMEOUT\x10\b2\x99\x03\n" +
+	"\x12TASK_STATE_TIMEOUT\x10\b2\xed\x05\n" +
 	"\x0fDispatchService\x12M\n" +
 	"\n" +
 	"SubmitTask\x12\x1e.dispatch.v1.SubmitTaskRequest\x1a\x1f.dispatch.v1.SubmitTaskResponse\x12D\n" +
@@ -1077,7 +1747,12 @@ const file_api_proto_dispatch_proto_rawDesc = "" +
 	"\tListTasks\x12\x1d.dispatch.v1.ListTasksRequest\x1a\x1e.dispatch.v1.ListTasksResponse\x12M\n" +
 	"\n" +
 	"CancelTask\x12\x1e.dispatch.v1.CancelTaskRequest\x1a\x1f.dispatch.v1.CancelTaskResponse\x12V\n" +
-	"\rGetQueueStats\x12!.dispatch.v1.GetQueueStatsRequest\x1a\".dispatch.v1.GetQueueStatsResponseB9Z7github.com/dispatchhub/dispatchhub/api/proto;dispatchpbb\x06proto3"
+	"\rGetQueueStats\x12!.dispatch.v1.GetQueueStatsRequest\x1a\".dispatch.v1.GetQueueStatsResponse\x12V\n" +
+	"\rCreateCronJob\x12!.dispatch.v1.CreateCronJobRequest\x1a\".dispatch.v1.CreateCronJobResponse\x12M\n" +
+	"\n" +
+	"GetCronJob\x12\x1e.dispatch.v1.GetCronJobRequest\x1a\x1f.dispatch.v1.GetCronJobResponse\x12S\n" +
+	"\fListCronJobs\x12 .dispatch.v1.ListCronJobsRequest\x1a!.dispatch.v1.ListCronJobsResponse\x12V\n" +
+	"\rDeleteCronJob\x12!.dispatch.v1.DeleteCronJobRequest\x1a\".dispatch.v1.DeleteCronJobResponseB9Z7github.com/dispatchhub/dispatchhub/api/proto;dispatchpbb\x06proto3"
 
 var (
 	file_api_proto_dispatch_proto_rawDescOnce sync.Once
@@ -1092,7 +1767,7 @@ func file_api_proto_dispatch_proto_rawDescGZIP() []byte {
 }
 
 var file_api_proto_dispatch_proto_enumTypes = make([]protoimpl.EnumInfo, 2)
-var file_api_proto_dispatch_proto_msgTypes = make([]protoimpl.MessageInfo, 14)
+var file_api_proto_dispatch_proto_msgTypes = make([]protoimpl.MessageInfo, 25)
 var file_api_proto_dispatch_proto_goTypes = []any{
 	(TaskPriority)(0),             // 0: dispatch.v1.TaskPriority
 	(TaskState)(0),                // 1: dispatch.v1.TaskState
@@ -1108,45 +1783,78 @@ var file_api_proto_dispatch_proto_goTypes = []any{
 	(*CancelTaskResponse)(nil),    // 11: dispatch.v1.CancelTaskResponse
 	(*GetQueueStatsRequest)(nil),  // 12: dispatch.v1.GetQueueStatsRequest
 	(*GetQueueStatsResponse)(nil), // 13: dispatch.v1.GetQueueStatsResponse
-	nil,                           // 14: dispatch.v1.TaskSpec.LabelsEntry
-	nil,                           // 15: dispatch.v1.ListTasksRequest.LabelsEntry
-	(*durationpb.Duration)(nil),   // 16: google.protobuf.Duration
-	(*timestamppb.Timestamp)(nil), // 17: google.protobuf.Timestamp
+	(*CronJob)(nil),               // 14: dispatch.v1.CronJob
+	(*CreateCronJobRequest)(nil),  // 15: dispatch.v1.CreateCronJobRequest
+	(*CreateCronJobResponse)(nil), // 16: dispatch.v1.CreateCronJobResponse
+	(*GetCronJobRequest)(nil),     // 17: dispatch.v1.GetCronJobRequest
+	(*GetCronJobResponse)(nil),    // 18: dispatch.v1.GetCronJobResponse
+	(*ListCronJobsRequest)(nil),   // 19: dispatch.v1.ListCronJobsRequest
+	(*ListCronJobsResponse)(nil),  // 20: dispatch.v1.ListCronJobsResponse
+	(*DeleteCronJobRequest)(nil),  // 21: dispatch.v1.DeleteCronJobRequest
+	(*DeleteCronJobResponse)(nil), // 22: dispatch.v1.DeleteCronJobResponse
+	nil,                           // 23: dispatch.v1.TaskSpec.LabelsEntry
+	nil,                           // 24: dispatch.v1.ListTasksRequest.LabelsEntry
+	nil,                           // 25: dispatch.v1.CronJob.LabelsEntry
+	nil,                           // 26: dispatch.v1.CreateCronJobRequest.LabelsEntry
+	(*durationpb.Duration)(nil),   // 27: google.protobuf.Duration
+	(*timestamppb.Timestamp)(nil), // 28: google.protobuf.Timestamp
 }
 var file_api_proto_dispatch_proto_depIdxs = []int32{
-	14, // 0: dispatch.v1.TaskSpec.labels:type_name -> dispatch.v1.TaskSpec.LabelsEntry
+	23, // 0: dispatch.v1.TaskSpec.labels:type_name -> dispatch.v1.TaskSpec.LabelsEntry
 	0,  // 1: dispatch.v1.TaskSpec.priority:type_name -> dispatch.v1.TaskPriority
-	16, // 2: dispatch.v1.TaskSpec.delay:type_name -> google.protobuf.Duration
-	17, // 3: dispatch.v1.TaskSpec.schedule_at:type_name -> google.protobuf.Timestamp
-	16, // 4: dispatch.v1.TaskSpec.timeout:type_name -> google.protobuf.Duration
-	16, // 5: dispatch.v1.TaskSpec.retry_backoff:type_name -> google.protobuf.Duration
+	27, // 2: dispatch.v1.TaskSpec.delay:type_name -> google.protobuf.Duration
+	28, // 3: dispatch.v1.TaskSpec.schedule_at:type_name -> google.protobuf.Timestamp
+	27, // 4: dispatch.v1.TaskSpec.timeout:type_name -> google.protobuf.Duration
+	27, // 5: dispatch.v1.TaskSpec.retry_backoff:type_name -> google.protobuf.Duration
 	2,  // 6: dispatch.v1.Task.spec:type_name -> dispatch.v1.TaskSpec
 	1,  // 7: dispatch.v1.Task.state:type_name -> dispatch.v1.TaskState
-	17, // 8: dispatch.v1.Task.created_at:type_name -> google.protobuf.Timestamp
-	17, // 9: dispatch.v1.Task.started_at:type_name -> google.protobuf.Timestamp
-	17, // 10: dispatch.v1.Task.finished_at:type_name -> google.protobuf.Timestamp
+	28, // 8: dispatch.v1.Task.created_at:type_name -> google.protobuf.Timestamp
+	28, // 9: dispatch.v1.Task.started_at:type_name -> google.protobuf.Timestamp
+	28, // 10: dispatch.v1.Task.finished_at:type_name -> google.protobuf.Timestamp
 	2,  // 11: dispatch.v1.SubmitTaskRequest.spec:type_name -> dispatch.v1.TaskSpec
 	3,  // 12: dispatch.v1.SubmitTaskResponse.task:type_name -> dispatch.v1.Task
 	3,  // 13: dispatch.v1.GetTaskResponse.task:type_name -> dispatch.v1.Task
 	1,  // 14: dispatch.v1.ListTasksRequest.state:type_name -> dispatch.v1.TaskState
-	15, // 15: dispatch.v1.ListTasksRequest.labels:type_name -> dispatch.v1.ListTasksRequest.LabelsEntry
+	24, // 15: dispatch.v1.ListTasksRequest.labels:type_name -> dispatch.v1.ListTasksRequest.LabelsEntry
 	3,  // 16: dispatch.v1.ListTasksResponse.tasks:type_name -> dispatch.v1.Task
 	3,  // 17: dispatch.v1.CancelTaskResponse.task:type_name -> dispatch.v1.Task
-	4,  // 18: dispatch.v1.DispatchService.SubmitTask:input_type -> dispatch.v1.SubmitTaskRequest
-	6,  // 19: dispatch.v1.DispatchService.GetTask:input_type -> dispatch.v1.GetTaskRequest
-	8,  // 20: dispatch.v1.DispatchService.ListTasks:input_type -> dispatch.v1.ListTasksRequest
-	10, // 21: dispatch.v1.DispatchService.CancelTask:input_type -> dispatch.v1.CancelTaskRequest
-	12, // 22: dispatch.v1.DispatchService.GetQueueStats:input_type -> dispatch.v1.GetQueueStatsRequest
-	5,  // 23: dispatch.v1.DispatchService.SubmitTask:output_type -> dispatch.v1.SubmitTaskResponse
-	7,  // 24: dispatch.v1.DispatchService.GetTask:output_type -> dispatch.v1.GetTaskResponse
-	9,  // 25: dispatch.v1.DispatchService.ListTasks:output_type -> dispatch.v1.ListTasksResponse
-	11, // 26: dispatch.v1.DispatchService.CancelTask:output_type -> dispatch.v1.CancelTaskResponse
-	13, // 27: dispatch.v1.DispatchService.GetQueueStats:output_type -> dispatch.v1.GetQueueStatsResponse
-	23, // [23:28] is the sub-list for method output_type
-	18, // [18:23] is the sub-list for method input_type
-	18, // [18:18] is the sub-list for extension type_name
-	18, // [18:18] is the sub-list for extension extendee
-	0,  // [0:18] is the sub-list for field type_name
+	25, // 18: dispatch.v1.CronJob.labels:type_name -> dispatch.v1.CronJob.LabelsEntry
+	0,  // 19: dispatch.v1.CronJob.priority:type_name -> dispatch.v1.TaskPriority
+	27, // 20: dispatch.v1.CronJob.timeout:type_name -> google.protobuf.Duration
+	27, // 21: dispatch.v1.CronJob.retry_backoff:type_name -> google.protobuf.Duration
+	28, // 22: dispatch.v1.CronJob.last_run_at:type_name -> google.protobuf.Timestamp
+	28, // 23: dispatch.v1.CronJob.next_run_at:type_name -> google.protobuf.Timestamp
+	28, // 24: dispatch.v1.CronJob.created_at:type_name -> google.protobuf.Timestamp
+	26, // 25: dispatch.v1.CreateCronJobRequest.labels:type_name -> dispatch.v1.CreateCronJobRequest.LabelsEntry
+	0,  // 26: dispatch.v1.CreateCronJobRequest.priority:type_name -> dispatch.v1.TaskPriority
+	27, // 27: dispatch.v1.CreateCronJobRequest.timeout:type_name -> google.protobuf.Duration
+	27, // 28: dispatch.v1.CreateCronJobRequest.retry_backoff:type_name -> google.protobuf.Duration
+	14, // 29: dispatch.v1.CreateCronJobResponse.cron_job:type_name -> dispatch.v1.CronJob
+	14, // 30: dispatch.v1.GetCronJobResponse.cron_job:type_name -> dispatch.v1.CronJob
+	14, // 31: dispatch.v1.ListCronJobsResponse.cron_jobs:type_name -> dispatch.v1.CronJob
+	4,  // 32: dispatch.v1.DispatchService.SubmitTask:input_type -> dispatch.v1.SubmitTaskRequest
+	6,  // 33: dispatch.v1.DispatchService.GetTask:input_type -> dispatch.v1.GetTaskRequest
+	8,  // 34: dispatch.v1.DispatchService.ListTasks:input_type -> dispatch.v1.ListTasksRequest
+	10, // 35: dispatch.v1.DispatchService.CancelTask:input_type -> dispatch.v1.CancelTaskRequest
+	12, // 36: dispatch.v1.DispatchService.GetQueueStats:input_type -> dispatch.v1.GetQueueStatsRequest
+	15, // 37: dispatch.v1.DispatchService.CreateCronJob:input_type -> dispatch.v1.CreateCronJobRequest
+	17, // 38: dispatch.v1.DispatchService.GetCronJob:input_type -> dispatch.v1.GetCronJobRequest
+	19, // 39: dispatch.v1.DispatchService.ListCronJobs:input_type -> dispatch.v1.ListCronJobsRequest
+	21, // 40: dispatch.v1.DispatchService.DeleteCronJob:input_type -> dispatch.v1.DeleteCronJobRequest
+	5,  // 41: dispatch.v1.DispatchService.SubmitTask:output_type -> dispatch.v1.SubmitTaskResponse
+	7,  // 42: dispatch.v1.DispatchService.GetTask:output_type -> dispatch.v1.GetTaskResponse
+	9,  // 43: dispatch.v1.DispatchService.ListTasks:output_type -> dispatch.v1.ListTasksResponse
+	11, // 44: dispatch.v1.DispatchService.CancelTask:output_type -> dispatch.v1.CancelTaskResponse
+	13, // 45: dispatch.v1.DispatchService.GetQueueStats:output_type -> dispatch.v1.GetQueueStatsResponse
+	16, // 46: dispatch.v1.DispatchService.CreateCronJob:output_type -> dispatch.v1.CreateCronJobResponse
+	18, // 47: dispatch.v1.DispatchService.GetCronJob:output_type -> dispatch.v1.GetCronJobResponse
+	20, // 48: dispatch.v1.DispatchService.ListCronJobs:output_type -> dispatch.v1.ListCronJobsResponse
+	22, // 49: dispatch.v1.DispatchService.DeleteCronJob:output_type -> dispatch.v1.DeleteCronJobResponse
+	41, // [41:50] is the sub-list for method output_type
+	32, // [32:41] is the sub-list for method input_type
+	32, // [32:32] is the sub-list for extension type_name
+	32, // [32:32] is the sub-list for extension extendee
+	0,  // [0:32] is the sub-list for field type_name
 }
 
 func init() { file_api_proto_dispatch_proto_init() }
@@ -1160,7 +1868,7 @@ func file_api_proto_dispatch_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_api_proto_dispatch_proto_rawDesc), len(file_api_proto_dispatch_proto_rawDesc)),
 			NumEnums:      2,
-			NumMessages:   14,
+			NumMessages:   25,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

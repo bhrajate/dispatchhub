@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net/http"
 	"os"
+	"time"
 
 	"github.com/dispatchhub/dispatchhub/internal/shared/domain/entity"
 	"github.com/dispatchhub/dispatchhub/internal/shared/infrastructure/config"
@@ -165,6 +166,8 @@ func main() {
 		log.Fatalf("worker: %v", err)
 	}
 
-	_ = opsServer.Shutdown(context.Background())
+	shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	_ = opsServer.Shutdown(shutdownCtx)
 	log.Info("worker shutdown complete")
 }

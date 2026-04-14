@@ -122,15 +122,23 @@ func main() {
 	if err != nil {
 		log.Fatalf("init task repository: %v", err)
 	}
+	cronRepo, err := mysqlstore.NewCronJobRepository(db)
+	if err != nil {
+		log.Fatalf("init cron job repository: %v", err)
+	}
 
 	// --- Scheduler domain service ---
-	domainSvc := scheddomainsvc.NewSchedulerService(broker, taskRepo, registry)
+	domainSvc := scheddomainsvc.NewSchedulerService(broker, taskRepo, cronRepo, registry)
 
 	// --- Scheduler application service ---
-	schedulerApp := application.NewSchedulerAppService(
-		application.DefaultSchedulerAppConfig(),
-		domainSvc,
-	)
+	appCfg := application.DefaultSchedulerAppConfig()
+	if cfg.Scheduler.CronCheckInterval > 0 {
+		appCfg.CronCheckInterval = cfg.Scheduler.CronCheckInterval
+	}
+	if cfg.Scheduler.CronBatchSize > 0 {
+		appCfg.CronBatchSize = cfg.Scheduler.CronBatchSize
+	}
+	schedulerApp := application.NewSchedulerAppService(appCfg, domainSvc)
 
 	// --- Leader election ---
 	schedulerID := fmt.Sprintf("scheduler-%s", uuid.New().String()[:8])
@@ -186,6 +194,8 @@ func main() {
 	<-ctx.Done()
 
 	log.Info("shutting down scheduler...")
-	_ = opsServer.Shutdown(ctx)
+	shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	_ = opsServer.Shutdown(shutdownCtx)
 	log.Info("scheduler shutdown complete")
 }
