@@ -24,13 +24,17 @@ const (
 	DispatchService_ListTasks_FullMethodName     = "/dispatch.v1.DispatchService/ListTasks"
 	DispatchService_CancelTask_FullMethodName    = "/dispatch.v1.DispatchService/CancelTask"
 	DispatchService_GetQueueStats_FullMethodName = "/dispatch.v1.DispatchService/GetQueueStats"
+	DispatchService_CreateCronJob_FullMethodName = "/dispatch.v1.DispatchService/CreateCronJob"
+	DispatchService_GetCronJob_FullMethodName    = "/dispatch.v1.DispatchService/GetCronJob"
+	DispatchService_ListCronJobs_FullMethodName  = "/dispatch.v1.DispatchService/ListCronJobs"
+	DispatchService_DeleteCronJob_FullMethodName = "/dispatch.v1.DispatchService/DeleteCronJob"
 )
 
 // DispatchServiceClient is the client API for DispatchService service.
 //
 // For semantics around ctx use and closing/ending streaming RPCs, please refer to https://pkg.go.dev/google.golang.org/grpc/?tab=doc#ClientConn.NewStream.
 //
-// DispatchService is the main API for task management.
+// DispatchService is the main API for task and cron job management.
 type DispatchServiceClient interface {
 	// Task operations
 	SubmitTask(ctx context.Context, in *SubmitTaskRequest, opts ...grpc.CallOption) (*SubmitTaskResponse, error)
@@ -39,6 +43,11 @@ type DispatchServiceClient interface {
 	CancelTask(ctx context.Context, in *CancelTaskRequest, opts ...grpc.CallOption) (*CancelTaskResponse, error)
 	// Queue operations
 	GetQueueStats(ctx context.Context, in *GetQueueStatsRequest, opts ...grpc.CallOption) (*GetQueueStatsResponse, error)
+	// CronJob operations
+	CreateCronJob(ctx context.Context, in *CreateCronJobRequest, opts ...grpc.CallOption) (*CreateCronJobResponse, error)
+	GetCronJob(ctx context.Context, in *GetCronJobRequest, opts ...grpc.CallOption) (*GetCronJobResponse, error)
+	ListCronJobs(ctx context.Context, in *ListCronJobsRequest, opts ...grpc.CallOption) (*ListCronJobsResponse, error)
+	DeleteCronJob(ctx context.Context, in *DeleteCronJobRequest, opts ...grpc.CallOption) (*DeleteCronJobResponse, error)
 }
 
 type dispatchServiceClient struct {
@@ -99,11 +108,51 @@ func (c *dispatchServiceClient) GetQueueStats(ctx context.Context, in *GetQueueS
 	return out, nil
 }
 
+func (c *dispatchServiceClient) CreateCronJob(ctx context.Context, in *CreateCronJobRequest, opts ...grpc.CallOption) (*CreateCronJobResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(CreateCronJobResponse)
+	err := c.cc.Invoke(ctx, DispatchService_CreateCronJob_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *dispatchServiceClient) GetCronJob(ctx context.Context, in *GetCronJobRequest, opts ...grpc.CallOption) (*GetCronJobResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(GetCronJobResponse)
+	err := c.cc.Invoke(ctx, DispatchService_GetCronJob_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *dispatchServiceClient) ListCronJobs(ctx context.Context, in *ListCronJobsRequest, opts ...grpc.CallOption) (*ListCronJobsResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ListCronJobsResponse)
+	err := c.cc.Invoke(ctx, DispatchService_ListCronJobs_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *dispatchServiceClient) DeleteCronJob(ctx context.Context, in *DeleteCronJobRequest, opts ...grpc.CallOption) (*DeleteCronJobResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(DeleteCronJobResponse)
+	err := c.cc.Invoke(ctx, DispatchService_DeleteCronJob_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // DispatchServiceServer is the server API for DispatchService service.
 // All implementations must embed UnimplementedDispatchServiceServer
 // for forward compatibility.
 //
-// DispatchService is the main API for task management.
+// DispatchService is the main API for task and cron job management.
 type DispatchServiceServer interface {
 	// Task operations
 	SubmitTask(context.Context, *SubmitTaskRequest) (*SubmitTaskResponse, error)
@@ -112,6 +161,11 @@ type DispatchServiceServer interface {
 	CancelTask(context.Context, *CancelTaskRequest) (*CancelTaskResponse, error)
 	// Queue operations
 	GetQueueStats(context.Context, *GetQueueStatsRequest) (*GetQueueStatsResponse, error)
+	// CronJob operations
+	CreateCronJob(context.Context, *CreateCronJobRequest) (*CreateCronJobResponse, error)
+	GetCronJob(context.Context, *GetCronJobRequest) (*GetCronJobResponse, error)
+	ListCronJobs(context.Context, *ListCronJobsRequest) (*ListCronJobsResponse, error)
+	DeleteCronJob(context.Context, *DeleteCronJobRequest) (*DeleteCronJobResponse, error)
 	mustEmbedUnimplementedDispatchServiceServer()
 }
 
@@ -136,6 +190,18 @@ func (UnimplementedDispatchServiceServer) CancelTask(context.Context, *CancelTas
 }
 func (UnimplementedDispatchServiceServer) GetQueueStats(context.Context, *GetQueueStatsRequest) (*GetQueueStatsResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method GetQueueStats not implemented")
+}
+func (UnimplementedDispatchServiceServer) CreateCronJob(context.Context, *CreateCronJobRequest) (*CreateCronJobResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method CreateCronJob not implemented")
+}
+func (UnimplementedDispatchServiceServer) GetCronJob(context.Context, *GetCronJobRequest) (*GetCronJobResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method GetCronJob not implemented")
+}
+func (UnimplementedDispatchServiceServer) ListCronJobs(context.Context, *ListCronJobsRequest) (*ListCronJobsResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method ListCronJobs not implemented")
+}
+func (UnimplementedDispatchServiceServer) DeleteCronJob(context.Context, *DeleteCronJobRequest) (*DeleteCronJobResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method DeleteCronJob not implemented")
 }
 func (UnimplementedDispatchServiceServer) mustEmbedUnimplementedDispatchServiceServer() {}
 func (UnimplementedDispatchServiceServer) testEmbeddedByValue()                         {}
@@ -248,6 +314,78 @@ func _DispatchService_GetQueueStats_Handler(srv interface{}, ctx context.Context
 	return interceptor(ctx, in, info, handler)
 }
 
+func _DispatchService_CreateCronJob_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(CreateCronJobRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(DispatchServiceServer).CreateCronJob(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: DispatchService_CreateCronJob_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(DispatchServiceServer).CreateCronJob(ctx, req.(*CreateCronJobRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _DispatchService_GetCronJob_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(GetCronJobRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(DispatchServiceServer).GetCronJob(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: DispatchService_GetCronJob_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(DispatchServiceServer).GetCronJob(ctx, req.(*GetCronJobRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _DispatchService_ListCronJobs_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ListCronJobsRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(DispatchServiceServer).ListCronJobs(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: DispatchService_ListCronJobs_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(DispatchServiceServer).ListCronJobs(ctx, req.(*ListCronJobsRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _DispatchService_DeleteCronJob_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(DeleteCronJobRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(DispatchServiceServer).DeleteCronJob(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: DispatchService_DeleteCronJob_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(DispatchServiceServer).DeleteCronJob(ctx, req.(*DeleteCronJobRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // DispatchService_ServiceDesc is the grpc.ServiceDesc for DispatchService service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -274,6 +412,22 @@ var DispatchService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "GetQueueStats",
 			Handler:    _DispatchService_GetQueueStats_Handler,
+		},
+		{
+			MethodName: "CreateCronJob",
+			Handler:    _DispatchService_CreateCronJob_Handler,
+		},
+		{
+			MethodName: "GetCronJob",
+			Handler:    _DispatchService_GetCronJob_Handler,
+		},
+		{
+			MethodName: "ListCronJobs",
+			Handler:    _DispatchService_ListCronJobs_Handler,
+		},
+		{
+			MethodName: "DeleteCronJob",
+			Handler:    _DispatchService_DeleteCronJob_Handler,
 		},
 	},
 	Streams:  []grpc.StreamDesc{},

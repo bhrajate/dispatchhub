@@ -32,9 +32,7 @@ Task 是系统的核心领域对象，代表一个待执行的工作单元。
 | `Priority` | TaskPriority (int) | 优先级，1-10，越大越优先 |
 | `Delay` | Duration | 入队后延迟执行的时长 |
 | `ScheduleAt` | *time.Time | 绝对执行时间点 |
-| `CronExpr` | string | Cron 表达式（周期性任务） |
 | `Timeout` | Duration | 单次执行超时时长 |
-| `Deadline` | *time.Time | 绝对截止时间 |
 
 #### 重试字段
 
@@ -262,20 +260,6 @@ func (l Labels) Matches(selector map[string]string) bool
 | `Draining` | 1 | 停止接受新任务，完成 in-flight 任务 |
 | `Offline` | 2 | 离线 |
 
-判断方法：
-
-```go
-// 是否可以接受新任务
-func (w *WorkerInfo) IsAvailable() bool {
-    return w.State == WorkerStateOnline && w.ActiveTasks < w.Concurrency
-}
-
-// 当前负载比 (0.0 ~ 1.0)
-func (w *WorkerInfo) Load() float64 {
-    return float64(w.ActiveTasks) / float64(w.Concurrency)
-}
-```
-
 ### Heartbeat（心跳）
 
 Worker 周期性发送给 Scheduler 的状态报告。
@@ -292,19 +276,6 @@ Worker 周期性发送给 Scheduler 的状态报告。
 ---
 
 ## Queue 相关模型
-
-### QueueConfig（队列配置）
-
-> 源码：`internal/shared/domain/entity/queue.go`
-
-| 字段 | 类型 | 说明 |
-|------|------|------|
-| `Name` | string | 队列名称 |
-| `Priority` | int | 队列优先级（多队列竞争时） |
-| `MaxSize` | int64 | 最大容量，0 = 不限 |
-| `RateLimit` | int | 每秒最大入队数，0 = 不限 |
-| `Concurrency` | int | 每 Worker 从此队列的最大并发数 |
-| `Paused` | bool | 是否暂停 |
 
 ### QueueStats（队列统计）
 
@@ -333,7 +304,6 @@ type TaskRepository interface {
     Update(ctx, task)                         error          // 乐观锁
     Delete(ctx, id)                           error
     List(ctx, filter)                         ([]*Task, int64, error)
-    BatchUpdateState(ctx, ids, from, to)      (int64, error) // 批量状态转换
 }
 ```
 

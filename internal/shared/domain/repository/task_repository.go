@@ -25,7 +25,10 @@ type TaskStore interface {
 	TaskWriter
 }
 
-// TaskCompensator provides queries for the compensate loop.
+// TaskCompensator provides queries and updates for the compensate loop.
 type TaskCompensator interface {
 	FindStaleByState(ctx context.Context, state entity.TaskState, olderThan time.Duration, limit int) ([]*entity.Task, error)
+	// TouchUpdatedAt refreshes updated_at WITHOUT incrementing version.
+	// This prevents version mismatch between Redis (task JSON) and MySQL.
+	TouchUpdatedAt(ctx context.Context, id string) error
 }

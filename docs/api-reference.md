@@ -42,8 +42,7 @@ POST /api/v1/tasks
     "queue_name": "high-priority",
     "max_retries": 3,
     "timeout": "30s",
-    "delay": "5m",
-    "cron_expr": ""
+    "delay": "5m"
 }
 ```
 
@@ -60,7 +59,6 @@ POST /api/v1/tasks
 | `max_retries` | int | 否 | 3 | 最大重试次数 |
 | `timeout` | string | 否 | "5m" | 执行超时（Go duration 格式） |
 | `delay` | string | 否 | "" | 延迟执行时长 |
-| `cron_expr` | string | 否 | "" | Cron 表达式 |
 
 **响应** `201 Created`：
 
@@ -287,14 +285,6 @@ service DispatchService {
 
     // 队列操作
     rpc GetQueueStats(GetQueueStatsRequest) returns (GetQueueStatsResponse);
-    rpc PauseQueue(PauseQueueRequest)       returns (PauseQueueResponse);
-    rpc ResumeQueue(ResumeQueueRequest)     returns (ResumeQueueResponse);
-
-    // Worker 操作
-    rpc ListWorkers(ListWorkersRequest)     returns (ListWorkersResponse);
-
-    // 流式事件
-    rpc WatchTasks(WatchTasksRequest)       returns (stream TaskEvent);
 }
 ```
 
@@ -313,12 +303,10 @@ message TaskSpec {
     TaskPriority priority = 7;
     google.protobuf.Duration delay = 8;
     google.protobuf.Timestamp schedule_at = 9;
-    string cron_expr = 10;
-    google.protobuf.Duration timeout = 11;
-    google.protobuf.Timestamp deadline = 12;
-    int32 max_retries = 13;
-    google.protobuf.Duration retry_backoff = 14;
-    string queue_name = 15;
+    google.protobuf.Duration timeout = 10;
+    int32 max_retries = 11;
+    google.protobuf.Duration retry_backoff = 12;
+    string queue_name = 13;
 }
 ```
 
@@ -337,37 +325,6 @@ message Task {
     google.protobuf.Timestamp started_at = 9;
     google.protobuf.Timestamp finished_at = 10;
     int64 version = 11;
-}
-```
-
-#### WorkerInfo
-
-```protobuf
-message WorkerInfo {
-    string id = 1;
-    string hostname = 2;
-    string ip = 3;
-    repeated string queues = 4;
-    int32 concurrency = 5;
-    int32 active_tasks = 6;
-    double cpu_usage = 7;
-    double mem_usage = 8;
-    string state = 9;
-    google.protobuf.Timestamp started_at = 10;
-    google.protobuf.Timestamp last_heartbeat = 11;
-}
-```
-
-#### TaskEvent（流式事件）
-
-```protobuf
-message TaskEvent {
-    string task_id = 1;
-    string event_type = 2;     // created / started / completed / failed / ...
-    TaskState old_state = 3;
-    TaskState new_state = 4;
-    string worker_id = 5;
-    google.protobuf.Timestamp timestamp = 6;
 }
 ```
 

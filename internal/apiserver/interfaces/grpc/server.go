@@ -9,6 +9,7 @@ import (
 	dispatchpb "github.com/dispatchhub/dispatchhub/api/proto"
 	apisvc "github.com/dispatchhub/dispatchhub/internal/apiserver/domain/service"
 	"github.com/dispatchhub/dispatchhub/internal/shared/domain/entity"
+	"github.com/dispatchhub/dispatchhub/pkg/cronutil"
 	"github.com/dispatchhub/dispatchhub/pkg/log"
 	grpc_middleware "github.com/grpc-ecosystem/go-grpc-middleware"
 	grpc_recovery "github.com/grpc-ecosystem/go-grpc-middleware/recovery"
@@ -206,6 +207,75 @@ func (s *Server) GetQueueStats(ctx context.Context, req *dispatchpb.GetQueueStat
 	}, nil
 }
 
+// --- CronJob handlers ---
+
+func (s *Server) CreateCronJob(ctx context.Context, req *dispatchpb.CreateCronJobRequest) (*dispatchpb.CreateCronJobResponse, error) {
+	if req.GetType() == "" || req.GetCronExpr() == "" {
+		return nil, status.Errorf(codes.InvalidArgument, "type and cron_expr are required")
+	}
+
+	job := &entity.CronJob{
+		Name:       req.GetName(),
+		Namespace:  req.GetNamespace(),
+		Type:       req.GetType(),
+		Payload:    req.GetPayload(),
+		Labels:     req.GetLabels(),
+		CronExpr:   req.GetCronExpr(),
+		QueueName:  req.GetQueueName(),
+		Priority:   entity.TaskPriority(req.GetPriority()),
+		MaxRetries: int(req.GetMaxRetries()),
+		Enabled:    true,
+	}
+	if d := req.GetTimeout(); d != nil {
+		job.Timeout = entity.Duration{Duration: d.AsDuration()}
+	}
+	if d := req.GetRetryBackoff(); d != nil {
+		job.RetryBackoff = entity.Duration{Duration: d.AsDuration()}
+	}
+
+	// Parse cron expression and compute initial next_run_at (infrastructure concern, not domain)
+	next, err := cronutil.NextRunTime(req.GetCronExpr(), time.Now())
+	if err != nil {
+		return nil, status.Errorf(codes.InvalidArgument, "invalid cron expression: %v", err)
+	}
+	job.NextRunAt = &next
+
+	if err := s.taskSvc.CreateCronJob(ctx, job); err != nil {
+		return nil, status.Errorf(codes.Internal, "create cron job: %v", err)
+	}
+	return &dispatchpb.CreateCronJobResponse{CronJob: entityToProtoCronJob(job)}, nil
+}
+
+func (s *Server) GetCronJob(ctx context.Context, req *dispatchpb.GetCronJobRequest) (*dispatchpb.GetCronJobResponse, error) {
+	job, err := s.taskSvc.GetCronJob(ctx, req.GetId())
+	if err != nil {
+		return nil, status.Errorf(codes.Internal, "get cron job: %v", err)
+	}
+	if job == nil {
+		return nil, status.Errorf(codes.NotFound, "cron job %s not found", req.GetId())
+	}
+	return &dispatchpb.GetCronJobResponse{CronJob: entityToProtoCronJob(job)}, nil
+}
+
+func (s *Server) ListCronJobs(ctx context.Context, req *dispatchpb.ListCronJobsRequest) (*dispatchpb.ListCronJobsResponse, error) {
+	jobs, total, err := s.taskSvc.ListCronJobs(ctx, req.GetNamespace(), int(req.GetLimit()), int(req.GetOffset()))
+	if err != nil {
+		return nil, status.Errorf(codes.Internal, "list cron jobs: %v", err)
+	}
+	pbJobs := make([]*dispatchpb.CronJob, len(jobs))
+	for i, j := range jobs {
+		pbJobs[i] = entityToProtoCronJob(j)
+	}
+	return &dispatchpb.ListCronJobsResponse{CronJobs: pbJobs, Total: total}, nil
+}
+
+func (s *Server) DeleteCronJob(ctx context.Context, req *dispatchpb.DeleteCronJobRequest) (*dispatchpb.DeleteCronJobResponse, error) {
+	if err := s.taskSvc.DeleteCronJob(ctx, req.GetId()); err != nil {
+		return nil, status.Errorf(codes.Internal, "delete cron job: %v", err)
+	}
+	return &dispatchpb.DeleteCronJobResponse{}, nil
+}
+
 // --- Conversion helpers ---
 
 func entityToProtoTask(t *entity.Task) *dispatchpb.Task {
@@ -295,6 +365,36 @@ func protoToEntityState(s dispatchpb.TaskState) entity.TaskState {
 	default:
 		return entity.TaskStatePending
 	}
+}
+
+func entityToProtoCronJob(j *entity.CronJob) *dispatchpb.CronJob {
+	pj := &dispatchpb.CronJob{
+		Id:         j.ID,
+		Name:       j.Name,
+		Namespace:  j.Namespace,
+		Type:       j.Type,
+		Payload:    j.Payload,
+		Labels:     j.Labels,
+		CronExpr:   j.CronExpr,
+		QueueName:  j.QueueName,
+		Priority:   dispatchpb.TaskPriority(j.Priority),
+		MaxRetries: int32(j.MaxRetries),
+		Enabled:    j.Enabled,
+		CreatedAt:  timestamppb.New(j.CreatedAt),
+	}
+	if j.Timeout.Duration > 0 {
+		pj.Timeout = durationpb.New(j.Timeout.Duration)
+	}
+	if j.RetryBackoff.Duration > 0 {
+		pj.RetryBackoff = durationpb.New(j.RetryBackoff.Duration)
+	}
+	if j.LastRunAt != nil {
+		pj.LastRunAt = timestamppb.New(*j.LastRunAt)
+	}
+	if j.NextRunAt != nil {
+		pj.NextRunAt = timestamppb.New(*j.NextRunAt)
+	}
+	return pj
 }
 
 // --- Interceptors ---

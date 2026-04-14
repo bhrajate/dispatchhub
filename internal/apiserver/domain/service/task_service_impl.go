@@ -24,15 +24,17 @@ type AfterSubmitHook func(task *entity.Task)
 type TaskServiceImpl struct {
 	broker       repository.QueueBroker
 	taskStore    repository.TaskStore
+	cronStore    repository.CronJobStore
 	beforeSubmit BeforeSubmitHook
 	afterSubmit  AfterSubmitHook
 }
 
 // NewTaskServiceImpl creates a new TaskServiceImpl.
-func NewTaskServiceImpl(broker repository.QueueBroker, taskStore repository.TaskStore) *TaskServiceImpl {
+func NewTaskServiceImpl(broker repository.QueueBroker, taskStore repository.TaskStore, cronStore repository.CronJobStore) *TaskServiceImpl {
 	return &TaskServiceImpl{
 		broker:    broker,
 		taskStore: taskStore,
+		cronStore: cronStore,
 	}
 }
 
@@ -124,6 +126,38 @@ func (s *TaskServiceImpl) ListTasks(ctx context.Context, filter entity.TaskFilte
 
 func (s *TaskServiceImpl) QueueStats(ctx context.Context, queue string) (*entity.QueueStats, error) {
 	return s.broker.Stats(ctx, queue)
+}
+
+// --- CronJob operations ---
+
+func (s *TaskServiceImpl) CreateCronJob(ctx context.Context, job *entity.CronJob) error {
+	if job.ID == "" {
+		job.ID = uuid.New().String()
+	}
+	if job.QueueName == "" {
+		job.QueueName = entity.DefaultQueueName
+	}
+	if job.Priority == 0 {
+		job.Priority = entity.PriorityDefault
+	}
+	if job.MaxRetries == 0 {
+		job.MaxRetries = 3
+	}
+	// NextRunAt must be set by the caller (HTTP/gRPC handler) after parsing cron expr.
+	// Domain layer does not depend on cron parsing library.
+	return s.cronStore.CreateCronJob(ctx, job)
+}
+
+func (s *TaskServiceImpl) GetCronJob(ctx context.Context, id string) (*entity.CronJob, error) {
+	return s.cronStore.GetCronJob(ctx, id)
+}
+
+func (s *TaskServiceImpl) ListCronJobs(ctx context.Context, namespace string, limit, offset int) ([]*entity.CronJob, int64, error) {
+	return s.cronStore.ListCronJobs(ctx, namespace, limit, offset)
+}
+
+func (s *TaskServiceImpl) DeleteCronJob(ctx context.Context, id string) error {
+	return s.cronStore.DeleteCronJob(ctx, id)
 }
 
 var _ TaskService = (*TaskServiceImpl)(nil)

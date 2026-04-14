@@ -25,7 +25,9 @@ type ServerConfig struct {
 }
 
 type SchedulerConfig struct {
-	LeaseDuration time.Duration `yaml:"lease_duration"`
+	LeaseDuration     time.Duration `yaml:"lease_duration"`
+	CronCheckInterval time.Duration `yaml:"cron_check_interval"`
+	CronBatchSize     int           `yaml:"cron_batch_size"`
 }
 
 type WorkerConfig struct {
@@ -87,7 +89,9 @@ func DefaultConfig() *Config {
 			HTTPAddr: ":8080",
 		},
 		Scheduler: SchedulerConfig{
-			LeaseDuration: 15 * time.Second,
+			LeaseDuration:     15 * time.Second,
+			CronCheckInterval: time.Second,
+			CronBatchSize:     100,
 		},
 		Worker: WorkerConfig{
 			Queues:            []string{"default"},

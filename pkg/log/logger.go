@@ -52,16 +52,16 @@ func Init(level, format, output string) {
 	defaultLogger = logger.Sugar()
 }
 
-func L() *zap.SugaredLogger  { return defaultLogger }
-func Info(args ...interface{})  { defaultLogger.Info(args...) }
-func Infof(t string, args ...interface{}) { defaultLogger.Infof(t, args...) }
-func Warn(args ...interface{})  { defaultLogger.Warn(args...) }
-func Warnf(t string, args ...interface{}) { defaultLogger.Warnf(t, args...) }
-func Error(args ...interface{}) { defaultLogger.Error(args...) }
+func L() *zap.SugaredLogger                { return defaultLogger }
+func Info(args ...interface{})             { defaultLogger.Info(args...) }
+func Infof(t string, args ...interface{})  { defaultLogger.Infof(t, args...) }
+func Warn(args ...interface{})             { defaultLogger.Warn(args...) }
+func Warnf(t string, args ...interface{})  { defaultLogger.Warnf(t, args...) }
+func Error(args ...interface{})            { defaultLogger.Error(args...) }
 func Errorf(t string, args ...interface{}) { defaultLogger.Errorf(t, args...) }
-func Debug(args ...interface{}) { defaultLogger.Debug(args...) }
+func Debug(args ...interface{})            { defaultLogger.Debug(args...) }
 func Debugf(t string, args ...interface{}) { defaultLogger.Debugf(t, args...) }
-func Fatal(args ...interface{}) { defaultLogger.Fatal(args...) }
+func Fatal(args ...interface{})            { defaultLogger.Fatal(args...) }
 func Fatalf(t string, args ...interface{}) { defaultLogger.Fatalf(t, args...) }
 
 func With(args ...interface{}) *zap.SugaredLogger {

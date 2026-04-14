@@ -1,14 +1,16 @@
 package main
 
 import (
+	"context"
 	"flag"
 	"fmt"
 	"os"
+	"time"
 
+	apisvc "github.com/dispatchhub/dispatchhub/internal/apiserver/domain/service"
 	apiservergrpc "github.com/dispatchhub/dispatchhub/internal/apiserver/interfaces/grpc"
 	apiserverhttp "github.com/dispatchhub/dispatchhub/internal/apiserver/interfaces/http"
 	"github.com/dispatchhub/dispatchhub/internal/shared/domain/entity"
-	apisvc "github.com/dispatchhub/dispatchhub/internal/apiserver/domain/service"
 	"github.com/dispatchhub/dispatchhub/internal/shared/infrastructure/config"
 	mysqlstore "github.com/dispatchhub/dispatchhub/internal/shared/infrastructure/persistence/mysql"
 	redisstore "github.com/dispatchhub/dispatchhub/internal/shared/infrastructure/persistence/redis"
@@ -95,9 +97,13 @@ func main() {
 	if err != nil {
 		log.Fatalf("init task repository: %v", err)
 	}
+	cronRepo, err := mysqlstore.NewCronJobRepository(db)
+	if err != nil {
+		log.Fatalf("init cron job repository: %v", err)
+	}
 
-	// --- Shared TaskService ---
-	taskSvc := apisvc.NewTaskServiceImpl(broker, taskRepo)
+	// --- TaskService ---
+	taskSvc := apisvc.NewTaskServiceImpl(broker, taskRepo, cronRepo)
 
 	// Rate limiting (per-queue token bucket)
 	limiter := ratelimit.NewMultiQueueLimiter(1000, 1000) // default: 1000 req/s per queue
@@ -135,7 +141,10 @@ func main() {
 	<-ctx.Done()
 
 	log.Info("shutting down apiserver...")
+	// Use fresh context for graceful shutdown (original ctx is already cancelled)
+	shutdownCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
 	grpcServer.GracefulStop()
-	_ = httpServer.Shutdown(ctx)
+	_ = httpServer.Shutdown(shutdownCtx)
 	log.Info("apiserver shutdown complete")
 }

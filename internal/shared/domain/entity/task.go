@@ -64,8 +64,8 @@ type Task struct {
 	// Scheduling
 	Priority   TaskPriority `json:"priority" gorm:"index"`
 	Delay      Duration     `json:"delay,omitempty"`
-	ScheduleAt *time.Time `json:"schedule_at,omitempty"`
-	Timeout    Duration   `json:"timeout"`
+	ScheduleAt *time.Time   `json:"schedule_at,omitempty"`
+	Timeout    Duration     `json:"timeout"`
 
 	// Retry policy
 	MaxRetries   int      `json:"max_retries"`
@@ -73,11 +73,11 @@ type Task struct {
 	RetryBackoff Duration `json:"retry_backoff"`
 
 	// State
-	State     TaskState  `json:"state" gorm:"index"`
-	Result    string     `json:"result,omitempty" gorm:"type:text"`
-	Error     string     `json:"error,omitempty" gorm:"type:text"`
-	WorkerID  string     `json:"worker_id,omitempty" gorm:"index;size:128"`
-	QueueName string     `json:"queue_name" gorm:"index;size:128"`
+	State     TaskState `json:"state" gorm:"index"`
+	Result    string    `json:"result,omitempty" gorm:"type:text"`
+	Error     string    `json:"error,omitempty" gorm:"type:text"`
+	WorkerID  string    `json:"worker_id,omitempty" gorm:"index;size:128"`
+	QueueName string    `json:"queue_name" gorm:"index;size:128"`
 
 	// Metadata
 	CreatedAt  time.Time  `json:"created_at" gorm:"autoCreateTime"`

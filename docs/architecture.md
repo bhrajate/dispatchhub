@@ -91,7 +91,7 @@ Scheduler 是有状态的控制面组件，通过 etcd Leader 选举保证**同�
 | `promoteDelayedLoop` | 1s | 扫描延迟队列，将到期任务移入就绪队列 |
 | `healthCheckLoop` | 10s | 检测 Worker 心跳，摘除超时节点 |
 | `metricsLoop` | 5s | 采集队列深度指标发布到 Prometheus |
-| `watchWorkers` | 事件驱动 | Watch etcd Worker 变更事件，更新哈希环 |
+| `watchWorkers` | 事件驱动 | Watch etcd Worker 变更事件，更新 Worker 列表 |
 
 ---
 
@@ -213,7 +213,6 @@ Scheduler-1                Scheduler-2              Scheduler-3
 |------|------|----------|
 | gRPC 长连接 | Keepalive 心跳，连接复用，Protobuf 高效序列化 | `internal/apiserver/interfaces/grpc/server.go` |
 | 延迟晋升 | 每秒扫描一次延迟队列，批量移动到就绪队列（每次最多100个） | `internal/scheduler/domain/service/scheduler.go` |
-| 批量操作 | BatchUpdateState 单次 SQL 更新多个任务状态 | `internal/shared/infrastructure/persistence/mysql/task_repository.go` |
 | 指数退避 | 重试间隔指数增长 + 25%随机抖动，避免惊群效应 | `internal/worker/application/service/worker_app_service.go` |
 | 无锁计数 | Worker 活跃任务数使用 atomic.Int64，避免锁竞争 | `internal/worker/application/service/worker_app_service.go` |
 
