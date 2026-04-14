@@ -6,7 +6,7 @@
 
 ### 1.1 功能需求（来自 QueueBroker 接口）
 
-> 源码：`pkg/store/store.go`
+> 源码：`internal/shared/domain/repository/`
 
 ```go
 type QueueBroker interface {
@@ -36,7 +36,7 @@ type QueueBroker interface {
 
 ### 1.2 非功能需求（来自 Worker 执行模型和三高目标）
 
-> 源码：`pkg/worker/worker.go` fetchLoop，`pkg/scheduler/scheduler.go`
+> 源码：`internal/worker/application/service/worker_app_service.go` fetchLoop，`internal/scheduler/domain/service/scheduler.go`
 
 | 编号 | 需求 | 来源 |
 |------|------|------|
@@ -234,7 +234,7 @@ RabbitMQ 的优先级队列虽然存在，但有工程限制：
 DispatchHub 的核心调度语义是：
 
 ```go
-// pkg/store/redis/queue.go:47
+// internal/shared/infrastructure/persistence/redis/queue_broker.go
 score := float64(-task.Priority)  // -10 < -8 < -5 < -1
 
 // Dequeue 注释
@@ -306,7 +306,7 @@ MySQL 存全量状态 (tasks 表 + task_events 表)
 分工明确：Redis 是快速队列的"热路径"，MySQL 是持久化的"冷路径"。两者在 `SubmitTask` 时同步写入：
 
 ```go
-// pkg/scheduler/scheduler.go
+// internal/scheduler/domain/service/scheduler.go
 s.taskStore.Create(ctx, task)  // MySQL 持久化
 s.broker.Enqueue(ctx, ...)     // Redis 入队
 ```

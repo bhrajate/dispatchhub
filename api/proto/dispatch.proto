@@ -2,7 +2,7 @@ syntax = "proto3";
 
 package dispatch.v1;
 
-option go_package = "github.com/dispatchhub/dispatchhub/api/proto/dispatch/v1;dispatchv1";
+option go_package = "github.com/dispatchhub/dispatchhub/api/proto;dispatchpb";
 
 import "google/protobuf/timestamp.proto";
 import "google/protobuf/duration.proto";
@@ -17,14 +17,6 @@ service DispatchService {
 
   // Queue operations
   rpc GetQueueStats(GetQueueStatsRequest) returns (GetQueueStatsResponse);
-  rpc PauseQueue(PauseQueueRequest) returns (PauseQueueResponse);
-  rpc ResumeQueue(ResumeQueueRequest) returns (ResumeQueueResponse);
-
-  // Worker operations
-  rpc ListWorkers(ListWorkersRequest) returns (ListWorkersResponse);
-
-  // Streaming: real-time task events
-  rpc WatchTasks(WatchTasksRequest) returns (stream TaskEvent);
 }
 
 // --- Task messages ---
@@ -39,12 +31,10 @@ message TaskSpec {
   TaskPriority priority = 7;
   google.protobuf.Duration delay = 8;
   google.protobuf.Timestamp schedule_at = 9;
-  string cron_expr = 10;
-  google.protobuf.Duration timeout = 11;
-  google.protobuf.Timestamp deadline = 12;
-  int32 max_retries = 13;
-  google.protobuf.Duration retry_backoff = 14;
-  string queue_name = 15;
+  google.protobuf.Duration timeout = 10;
+  int32 max_retries = 11;
+  google.protobuf.Duration retry_backoff = 12;
+  string queue_name = 13;
 }
 
 enum TaskPriority {
@@ -136,54 +126,4 @@ message GetQueueStatsResponse {
   int64 retrying = 5;
   int64 completed = 6;
   int64 failed = 7;
-}
-
-message PauseQueueRequest {
-  string queue_name = 1;
-}
-
-message PauseQueueResponse {}
-
-message ResumeQueueRequest {
-  string queue_name = 1;
-}
-
-message ResumeQueueResponse {}
-
-// --- Worker messages ---
-
-message WorkerInfo {
-  string id = 1;
-  string hostname = 2;
-  string ip = 3;
-  repeated string queues = 4;
-  int32 concurrency = 5;
-  int32 active_tasks = 6;
-  double cpu_usage = 7;
-  double mem_usage = 8;
-  string state = 9;
-  google.protobuf.Timestamp started_at = 10;
-  google.protobuf.Timestamp last_heartbeat = 11;
-}
-
-message ListWorkersRequest {}
-
-message ListWorkersResponse {
-  repeated WorkerInfo workers = 1;
-}
-
-// --- Events ---
-
-message WatchTasksRequest {
-  string namespace = 1;
-  string queue_name = 2;
-}
-
-message TaskEvent {
-  string task_id = 1;
-  string event_type = 2;
-  TaskState old_state = 3;
-  TaskState new_state = 4;
-  string worker_id = 5;
-  google.protobuf.Timestamp timestamp = 6;
 }

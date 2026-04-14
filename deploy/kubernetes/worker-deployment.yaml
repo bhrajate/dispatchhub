@@ -36,6 +36,9 @@ spec:
           args:
             - --config=/etc/dispatchhub/config.yaml
           ports:
+            - name: http
+              containerPort: 8080
+              protocol: TCP
             - name: metrics
               containerPort: 9091
               protocol: TCP

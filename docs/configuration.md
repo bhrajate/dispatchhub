@@ -1,6 +1,6 @@
 # 配置参考
 
-> 源码：`pkg/config/config.go`
+> 源码：`internal/shared/infrastructure/config/config.go`
 
 ## 配置加载方式
 
@@ -46,7 +46,6 @@ server:
 | `renew_interval` | duration | `5s` | Lease 续约间隔 |
 | `schedule_interval` | duration | `100ms` | 调度主循环 tick 间隔 |
 | `max_batch_size` | int | `100` | 每次调度循环最大处理任务数 |
-| `virtual_nodes` | int | `150` | 一致性哈希虚拟节点数 |
 
 ```yaml
 scheduler:
@@ -54,13 +53,11 @@ scheduler:
   renew_interval: 5s
   schedule_interval: 100ms
   max_batch_size: 100
-  virtual_nodes: 150
 ```
 
 **调优建议**：
 
 - `lease_duration`：越小故障切换越快，但对 etcd 压力越大。推荐 10s~30s
-- `virtual_nodes`：越大负载越均匀，但内存消耗略增。推荐 100~300
 - `schedule_interval`：越小延迟越低，但 CPU 消耗越高。推荐 50ms~500ms
 
 ---
@@ -271,7 +268,6 @@ scheduler:
   renew_interval: 5s
   schedule_interval: 100ms
   max_batch_size: 100
-  virtual_nodes: 150
 
 worker:
   queues:

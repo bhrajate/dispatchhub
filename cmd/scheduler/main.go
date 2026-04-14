@@ -2,24 +2,25 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"flag"
 	"fmt"
+	"net/http"
 	"os"
 	"time"
 
-	"github.com/dispatchhub/dispatchhub/internal/version"
-	"github.com/dispatchhub/dispatchhub/pkg/config"
-	"github.com/dispatchhub/dispatchhub/pkg/election"
+	"github.com/dispatchhub/dispatchhub/internal/scheduler/application"
+	scheddomainsvc "github.com/dispatchhub/dispatchhub/internal/scheduler/domain/service"
+	"github.com/dispatchhub/dispatchhub/internal/scheduler/infrastructure/election"
+	"github.com/dispatchhub/dispatchhub/internal/shared/infrastructure/config"
+	etcdstore "github.com/dispatchhub/dispatchhub/internal/shared/infrastructure/persistence/etcd"
+	mysqlstore "github.com/dispatchhub/dispatchhub/internal/shared/infrastructure/persistence/mysql"
+	redisstore "github.com/dispatchhub/dispatchhub/internal/shared/infrastructure/persistence/redis"
+	"github.com/dispatchhub/dispatchhub/internal/shared/infrastructure/version"
 	"github.com/dispatchhub/dispatchhub/pkg/log"
 	"github.com/dispatchhub/dispatchhub/pkg/metrics"
-	"github.com/dispatchhub/dispatchhub/pkg/scheduler"
 	"github.com/dispatchhub/dispatchhub/pkg/signals"
-	redisstore "github.com/dispatchhub/dispatchhub/pkg/store/redis"
-	etcdstore "github.com/dispatchhub/dispatchhub/pkg/store/etcd"
-	mysqlstore "github.com/dispatchhub/dispatchhub/pkg/store/mysql"
-
-	grpcapi "github.com/dispatchhub/dispatchhub/pkg/api/grpc"
-	httpapi "github.com/dispatchhub/dispatchhub/pkg/api/http"
+	"github.com/prometheus/client_golang/prometheus/promhttp"
 
 	"github.com/google/uuid"
 	goredis "github.com/redis/go-redis/v9"
@@ -44,7 +45,6 @@ func main() {
 		os.Exit(0)
 	}
 
-	// Load config
 	var cfg *config.Config
 	var err error
 	if configFile != "" {
@@ -57,18 +57,13 @@ func main() {
 		cfg = config.DefaultConfig()
 	}
 
-	// Initialize logger
 	log.Init(cfg.Log.Level, cfg.Log.Format, cfg.Log.Output)
 	defer log.Sync()
 
 	log.Info(version.Info())
-
-	// Setup signal handler
 	ctx := signals.SetupSignalContext()
 
-	// --- Initialize infrastructure ---
-
-	// etcd client
+	// --- Infrastructure: etcd (leader election + worker registry) ---
 	etcdClient, err := clientv3.New(clientv3.Config{
 		Endpoints:   cfg.Etcd.Endpoints,
 		DialTimeout: cfg.Etcd.DialTimeout,
@@ -80,7 +75,7 @@ func main() {
 	}
 	defer etcdClient.Close()
 
-	// Redis client
+	// --- Infrastructure: Redis (queue broker for promote delayed) ---
 	var redisClient goredis.UniversalClient
 	if cfg.Redis.ClusterMode {
 		redisClient = goredis.NewClusterClient(&goredis.ClusterOptions{
@@ -106,27 +101,36 @@ func main() {
 	}
 	defer redisClient.Close()
 
-	// MySQL
+	// --- MySQL (for compensate loop: scan orphaned Pending tasks) ---
 	db, err := gorm.Open(mysql.Open(cfg.MySQL.DSN), &gorm.Config{})
 	if err != nil {
 		log.Fatalf("connect mysql: %v", err)
 	}
-	sqlDB, _ := db.DB()
+	sqlDB, err := db.DB()
+	if err != nil {
+		log.Fatalf("get sql.DB: %v", err)
+	}
 	sqlDB.SetMaxOpenConns(cfg.MySQL.MaxOpenConns)
 	sqlDB.SetMaxIdleConns(cfg.MySQL.MaxIdleConns)
 	sqlDB.SetConnMaxLifetime(cfg.MySQL.ConnMaxLifetime)
 	defer sqlDB.Close()
 
-	// --- Build stores ---
+	// --- Repositories ---
 	broker := redisstore.NewQueueBroker(redisClient)
-	registry := etcdstore.NewRegistry(etcdClient)
-	taskStore, err := mysqlstore.NewTaskStore(db)
+	registry := etcdstore.NewWorkerRegistry(etcdClient)
+	taskRepo, err := mysqlstore.NewTaskRepository(db)
 	if err != nil {
-		log.Fatalf("init task store: %v", err)
+		log.Fatalf("init task repository: %v", err)
 	}
 
-	// --- Build scheduler ---
-	sched := scheduler.New(cfg.Scheduler, broker, taskStore, registry)
+	// --- Scheduler domain service ---
+	domainSvc := scheddomainsvc.NewSchedulerService(broker, taskRepo, registry)
+
+	// --- Scheduler application service ---
+	schedulerApp := application.NewSchedulerAppService(
+		application.DefaultSchedulerAppConfig(),
+		domainSvc,
+	)
 
 	// --- Leader election ---
 	schedulerID := fmt.Sprintf("scheduler-%s", uuid.New().String()[:8])
@@ -138,7 +142,7 @@ func main() {
 		OnStartedLeading: func(leaderCtx context.Context) {
 			log.Infof("this instance is now the leader: %s", schedulerID)
 			metrics.LeaderElections.Inc()
-			if err := sched.Run(leaderCtx); err != nil {
+			if err := schedulerApp.Run(leaderCtx); err != nil {
 				log.Errorf("scheduler run error: %v", err)
 			}
 		},
@@ -150,35 +154,38 @@ func main() {
 		},
 	})
 
-	// Start leader election in background
 	go func() {
 		if err := le.Run(ctx); err != nil {
 			log.Errorf("leader election: %v", err)
 		}
 	}()
 
-	// --- Start API servers ---
-	// gRPC always runs (forwards to leader if not leader)
-	grpcServer := grpcapi.NewServer(sched)
+	// --- Internal ops server (health + metrics only) ---
+	opsMux := http.NewServeMux()
+	opsMux.Handle("GET /metrics", promhttp.Handler())
+	opsMux.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
+	})
+	opsMux.HandleFunc("GET /readyz", func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]string{"status": "ready"})
+	})
+
+	opsServer := &http.Server{
+		Addr:    cfg.Server.HTTPAddr,
+		Handler: opsMux,
+	}
 	go func() {
-		if err := grpcServer.Serve(cfg.Server.GRPCAddr); err != nil {
-			log.Fatalf("gRPC server: %v", err)
+		log.Infof("scheduler ops server listening on %s", cfg.Server.HTTPAddr)
+		if err := opsServer.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+			log.Errorf("ops server: %v", err)
 		}
 	}()
 
-	// HTTP REST + metrics
-	httpServer := httpapi.NewServer(sched, cfg.Server.HTTPAddr)
-	go func() {
-		if err := httpServer.Serve(); err != nil {
-			log.Errorf("HTTP server: %v", err)
-		}
-	}()
-
-	// Wait for shutdown
 	<-ctx.Done()
 
 	log.Info("shutting down scheduler...")
-	grpcServer.GracefulStop()
-	_ = httpServer.Shutdown(ctx)
+	_ = opsServer.Shutdown(ctx)
 	log.Info("scheduler shutdown complete")
 }

@@ -43,18 +43,115 @@ DispatchHub 采用**控制面 / 数据面**分离架构，借鉴了 Kubernetes �
 └─────────────────────┘
 ```
 
+## 组件职责
+
+### API Server — 系统唯一的外部入口
+
+> 源码：`cmd/apiserver/`、`internal/apiserver/`
+
+API Server 是纯无状态网关，**系统中唯一对外暴露任务管理 API 的组件**。Scheduler 和 Worker 不对外暴露任务管理接口。
+
+| 职责 | 说明 |
+|------|------|
+| HTTP REST API | `POST /api/v1/tasks`、`GET /api/v1/tasks/{id}`、`GET /api/v1/tasks`、`POST /api/v1/tasks/{id}/cancel`、`GET /api/v1/queues/{name}/stats` |
+| gRPC API | SubmitTask、GetTask、ListTasks、CancelTask、QueueStats、WatchTasks |
+| 健康探针 | `/healthz`、`/readyz`（K8s liveness/readiness） |
+| 指标暴露 | `/metrics`（Prometheus） |
+
+**依赖关系**：仅依赖 `internal/apiserver/` + `internal/shared/`（TaskServiceImpl），不引用 scheduler 或 worker 的任何代码。
+
+**不做的事**：不参与 Leader 选举、不运行调度循环、不执行任务。可部署任意数量副本，前置 LoadBalancer/Ingress 即可。
+
+---
+
+### Scheduler — 调度控制面
+
+> 源码：`cmd/scheduler/`、`internal/scheduler/`
+
+Scheduler 是有状态的控制面组件，通过 etcd Leader 选举保证**同一时刻只有一个 Leader 运行调度循环**，其余副本 Standby 等待接管。
+
+| 职责 | 说明 |
+|------|------|
+| 延迟任务晋升 | 每秒扫描 delayed ZSET，将到期任务移入 ready 队列 |
+| 孤儿任务补偿 | 每 30s 扫描 MySQL 中 Pending 但未入 Redis 的任务，安全重新入队 |
+| Worker 拓扑管理 | Watch etcd Worker 注册变更 |
+| Worker 健康检查 | 每 10s 检测心跳，30s 无心跳的 Worker 自动摘除 |
+| Leader 选举 | etcd concurrency.Election，3 副本仅 1 个 Leader 运行上述循环 |
+| 队列指标采集 | 每 5s 发布队列深度（pending/active/scheduled）到 Prometheus |
+| 运维端点 | 仅暴露 `/healthz`、`/readyz`、`/metrics` |
+
+**依赖关系**：仅依赖 `internal/scheduler/` + `internal/shared/`。
+
+**不做的事**：**不对外暴露 HTTP/gRPC 任务管理 API**、不执行任务。
+
+**Scheduler 内部循环**：
+
+| 循环 | 周期 | 功能 |
+|------|------|------|
+| `promoteDelayedLoop` | 1s | 扫描延迟队列，将到期任务移入就绪队列 |
+| `healthCheckLoop` | 10s | 检测 Worker 心跳，摘除超时节点 |
+| `metricsLoop` | 5s | 采集队列深度指标发布到 Prometheus |
+| `watchWorkers` | 事件驱动 | Watch etcd Worker 变更事件，更新哈希环 |
+
+---
+
+### Worker — 执行数据面
+
+> 源码：`cmd/worker/`、`internal/worker/`
+
+Worker 是完全无状态的数据面组件，采用 **Pull 模型**从 Redis 队列拉取任务执行。通过 K8s HPA 可在 3~50 副本之间自动伸缩。
+
+| 职责 | 说明 |
+|------|------|
+| 任务拉取 | 从 Redis 队列 Dequeue（Pull 模型），背压由 channel semaphore 控制 |
+| 任务执行 | 查找 Handler → 应用中间件链（Recovery/Logging/Timeout）→ 执行 |
+| 结果上报 | 成功 → Ack + MySQL 状态更新为 Completed；失败 → Nack 重入队列或标记 Failed |
+| 心跳上报 | 每 5s 向 etcd 发送心跳（CPU、内存、活跃任务数） |
+| 服务注册 | 启动时向 etcd 注册，关闭时注销 |
+| 优雅停机 | SIGTERM → 停止拉取 → 等待 in-flight 完成（最长 30s）→ 注销 |
+| 运维端点 | 仅暴露 `/healthz`、`/readyz`、`/metrics` |
+
+**依赖关系**：仅依赖 `internal/worker/` + `internal/shared/`。
+
+**不做的事**：**不对外暴露任务管理 API**、不参与调度决策。
+
+---
+
+### 组件间协作
+
+三个组件之间**零直接通信**，全部通过基础设施解耦：
+
+```
+外部客户端 ──HTTP/gRPC──▶ APIServer ──TaskServiceImpl──▶ MySQL + Redis
+                                                              │
+Scheduler(Leader) ──reconciliation loops──────────────────────┤
+  - promoteDelayed → Redis                                    │
+  - healthCheck → etcd                                        │
+  - watchWorkers → etcd                                       │
+                                                              │
+Worker(N) ──Dequeue────────────────────────── Redis ◀─────────┘
+          ──Heartbeat──────────────────────── etcd
+          ──Update─────────────────────────── MySQL
+```
+
+| 基础设施 | 角色 | 谁在读 | 谁在写 |
+|----------|------|--------|--------|
+| **Redis** | 任务队列 | Worker（Dequeue） | APIServer（Enqueue）、Scheduler（PromoteDelayed） |
+| **etcd** | 服务协调 | Scheduler（Watch、健康检查） | Worker（Register、Heartbeat）、Scheduler（Leader 选举） |
+| **MySQL** | 持久化 | APIServer（查询）、Worker（状态更新） | APIServer（Create）、Worker（Update） |
+
 ## 三高设计方案
 
 ### 高并发 (High Concurrency)
 
 | 机制 | 实现 | 文件位置 |
 |------|------|----------|
-| 优先级队列 | Redis Sorted Set，score = 负优先级，ZPOPMIN 获取最高优先级任务 | `pkg/store/redis/queue.go` |
-| 原子出队 | Lua 脚本实现 ZPOPMIN + HSET inflight 原子操作，避免竞态 | `pkg/store/redis/queue.go` |
-| 协程池 | 基于 channel semaphore 的有界协程池，超出时自动阻塞（背压） | `pkg/worker/worker.go` |
+| 优先级队列 | Redis Sorted Set，score = 负优先级，ZPOPMIN 获取最高优先级任务 | `internal/shared/infrastructure/persistence/redis/queue_broker.go` |
+| 原子出队 | Lua 脚本实现 ZPOPMIN + HSET inflight 原子操作，避免竞态 | `internal/shared/infrastructure/persistence/redis/queue_broker.go` |
+| 协程池 | 基于 channel semaphore 的有界协程池，超出时自动阻塞（背压） | `internal/worker/application/service/worker_app_service.go` |
 | 令牌桶限流 | 每个队列独立的令牌桶限流器，精确控制入队速率 | `pkg/ratelimit/ratelimit.go` |
-| Pipeline | Redis Pipeline 批量执行，减少网络往返 | `pkg/store/redis/queue.go` |
-| 连接池 | Redis PoolSize=100，MySQL MaxOpenConns=50，避免连接瓶颈 | `pkg/config/config.go` |
+| Pipeline | Redis Pipeline 批量执行，减少网络往返 | `internal/shared/infrastructure/persistence/redis/queue_broker.go` |
+| 连接池 | Redis PoolSize=100，MySQL MaxOpenConns=50，避免连接瓶颈 | `internal/shared/infrastructure/config/config.go` |
 
 **背压机制设计**：
 
@@ -78,12 +175,12 @@ fetchLoop:
 
 | 机制 | 实现 | 文件位置 |
 |------|------|----------|
-| Leader 选举 | 基于 etcd concurrency 包，类似 K8s client-go leaderelection | `pkg/election/election.go` |
+| Leader 选举 | 基于 etcd concurrency 包，类似 K8s client-go leaderelection | `internal/scheduler/infrastructure/election/election.go` |
 | 多副本热备 | Scheduler 部署 3 副本，仅 Leader 运行调度循环，Standby 等待接管 | `cmd/scheduler/main.go` |
-| 心跳检测 | Worker 每 5s 发送心跳，Scheduler 30s 未收到则摘除并重新调度任务 | `pkg/worker/worker.go` |
-| 临时注册 | etcd Lease 机制，Worker 崩溃后 15s 内自动注销 | `pkg/store/etcd/registry.go` |
-| 乐观锁 | MySQL Version 字段防止并发更新冲突 | `pkg/store/mysql/task_store.go` |
-| 优雅停机 | 信号捕获 + WaitGroup 等待 in-flight 任务完成 | `pkg/worker/worker.go` |
+| 心跳检测 | Worker 每 5s 发送心跳，Scheduler 30s 未收到则摘除并重新调度任务 | `internal/worker/application/service/worker_app_service.go` |
+| 临时注册 | etcd Lease 机制，Worker 崩溃后 15s 内自动注销 | `internal/shared/infrastructure/persistence/etcd/worker_registry.go` |
+| 乐观锁 | MySQL Version 字段防止并发更新冲突 | `internal/shared/infrastructure/persistence/mysql/task_repository.go` |
+| 优雅停机 | 信号捕获 + WaitGroup 等待 in-flight 任务完成 | `internal/worker/application/service/worker_app_service.go` |
 | Pod 反亲和 | K8s podAntiAffinity 确保 Scheduler 副本分布在不同节点 | `deploy/kubernetes/` |
 
 **Leader 选举流程**：
@@ -114,12 +211,11 @@ Scheduler-1                Scheduler-2              Scheduler-3
 
 | 机制 | 实现 | 文件位置 |
 |------|------|----------|
-| 一致性哈希 | CRC32 + 虚拟节点（默认150），Worker 增减时最小化任务重分配 | `pkg/hash/consistent.go` |
-| gRPC 长连接 | Keepalive 心跳，连接复用，Protobuf 高效序列化 | `pkg/api/grpc/server.go` |
-| 延迟晋升 | 每秒扫描一次延迟队列，批量移动到就绪队列（每次最多100个） | `pkg/scheduler/scheduler.go` |
-| 批量操作 | BatchUpdateState 单次 SQL 更新多个任务状态 | `pkg/store/mysql/task_store.go` |
-| 指数退避 | 重试间隔指数增长 + 25%随机抖动，避免惊群效应 | `pkg/retry/retry.go` |
-| 无锁计数 | Worker 活跃任务数使用 atomic.Int64，避免锁竞争 | `pkg/worker/worker.go` |
+| gRPC 长连接 | Keepalive 心跳，连接复用，Protobuf 高效序列化 | `internal/apiserver/interfaces/grpc/server.go` |
+| 延迟晋升 | 每秒扫描一次延迟队列，批量移动到就绪队列（每次最多100个） | `internal/scheduler/domain/service/scheduler.go` |
+| 批量操作 | BatchUpdateState 单次 SQL 更新多个任务状态 | `internal/shared/infrastructure/persistence/mysql/task_repository.go` |
+| 指数退避 | 重试间隔指数增长 + 25%随机抖动，避免惊群效应 | `internal/worker/application/service/worker_app_service.go` |
+| 无锁计数 | Worker 活跃任务数使用 atomic.Int64，避免锁竞争 | `internal/worker/application/service/worker_app_service.go` |
 
 ## 设计决策
 
@@ -158,7 +254,7 @@ Scheduler-1                Scheduler-2              Scheduler-3
 1. Client ──POST /api/v1/tasks──▶ API Server
                                        │
 2.                                     ▼
-                                  Scheduler.SubmitTask()
+                                  TaskServiceImpl.SubmitTask()
                                        │
 3.                            ┌────────┴────────┐
                               │                 │

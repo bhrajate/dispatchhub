@@ -34,7 +34,7 @@
 
 - **控制面（Scheduler）**：负责任务调度决策、延迟任务晋升、Worker 健康检查。部署 3 副本，通过 etcd Leader 选举保证**只有一个 Leader 在运行调度逻辑**，其余 Standby 节点随时待命。
 - **数据面（Worker）**：负责任务的实际执行，完全无状态，可以随意水平扩展。通过 Kubernetes HPA 根据 CPU 和活跃任务数自动在 3~50 个副本之间伸缩。
-- **接入层（API Server）**：无状态的 HTTP/gRPC 网关，对外暴露 RESTful API 和 gRPC 接口。
+- **接入层（API Server）**：系统唯一的外部入口，无状态 HTTP/gRPC 网关。Scheduler 和 Worker 仅暴露运维端点（healthz/readyz/metrics），不对外暴露任务管理 API。
 
 存储层也做了职责分离——**Redis** 做队列热路径，负责入队出队这种高频操作；**MySQL** 做持久化冷路径，保存任务状态和审计日志；**etcd** 做协调层，负责 Leader 选举和 Worker 服务注册。
 

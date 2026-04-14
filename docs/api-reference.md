@@ -9,7 +9,7 @@ DispatchHub 提供两种 API 接入方式：
 
 ## HTTP REST API
 
-> 源码：`pkg/api/http/server.go`
+> 源码：`internal/apiserver/interfaces/http/server.go`
 
 基础路径：`http://<host>:8080`
 
@@ -271,7 +271,7 @@ GET /metrics
 
 ## gRPC API
 
-> 源码：`api/proto/dispatch.proto`、`pkg/api/grpc/server.go`
+> 源码：`api/proto/dispatch.proto`、`internal/apiserver/interfaces/grpc/server.go`
 
 端口 9090，使用 Protocol Buffers 定义接口。
 

@@ -8,7 +8,7 @@ DispatchHub 是一个生产级别的分布式任务调度平台，参考了 Kube
 
 - **高并发**：基于 Redis Sorted Set 的优先级队列 + Lua 原子脚本，Worker 协程池背压控制
 - **高可用**：etcd Leader 选举实现 Scheduler 多副本热备，Worker 心跳检测与自动摘除
-- **高性能**：一致性哈希分片，gRPC 长连接通信，延迟任务定时晋升，批量状态转换
+- **高性能**：gRPC 长连接通信，延迟任务定时晋升，批量状态转换
 
 ## 架构总览
 
@@ -65,37 +65,51 @@ DispatchHub 是一个生产级别的分布式任务调度平台，参考了 Kube
 ```
 dispatchhub/
 ├── cmd/
-│   ├── scheduler/       # 调度器入口
-│   ├── worker/          # 工作节点入口
-│   └── apiserver/       # API 网关入口
-├── pkg/
-│   ├── types/           # 领域模型 (Task, Worker, Queue)
-│   ├── scheduler/       # 调度器核心逻辑
-│   ├── worker/          # Worker 执行引擎
-│   ├── store/           # 存储接口定义
-│   │   ├── redis/       # Redis 队列实现
-│   │   ├── etcd/        # etcd 注册中心实现
-│   │   └── mysql/       # MySQL 持久化实现
-│   ├── api/
-│   │   ├── grpc/        # gRPC 服务端
-│   │   └── http/        # REST API + 健康检查
-│   ├── election/        # etcd Leader 选举
-│   ├── hash/            # 一致性哈希环
-│   ├── config/          # 配置管理
-│   ├── metrics/         # Prometheus 指标
-│   ├── middleware/       # Worker 中间件 (日志/恢复/超时)
-│   ├── ratelimit/       # 令牌桶限流器
-│   ├── retry/           # 指数退避重试
-│   ├── log/             # 结构化日志
-│   └── signals/         # 信号处理
-├── api/proto/           # Protobuf 定义
+│   ├── apiserver/              # API 网关入口
+│   ├── scheduler/              # 调度器入口
+│   └── worker/                 # 工作节点入口
+├── internal/
+│   ├── shared/                 # 跨服务共享
+│   │   ├── domain/
+│   │   │   ├── entity/         # 实体 & 值对象 (Task, Worker, Queue)
+│   │   │   ├── repository/     # 仓储接口 (TaskRepository, QueueBroker, WorkerRegistry)
+│   │   │   └── service/        # 服务接口 (TaskService)
+│   │   └── infrastructure/
+│   │       ├── config/         # 配置管理
+│   │       ├── version/        # 版本信息
+│   │       └── persistence/
+│   │           ├── mysql/      # MySQL 持久化实现
+│   │           ├── redis/      # Redis 队列实现
+│   │           └── etcd/       # etcd 注册中心实现
+│   ├── apiserver/              # API Server 服务
+│   │   └── interfaces/
+│   │       ├── grpc/           # gRPC 接口
+│   │       └── http/           # REST API + 健康检查
+│   ├── scheduler/              # Scheduler 服务
+│   │   ├── domain/service/     # 调度领域服务 (核心算法)
+│   │   ├── application/        # 应用编排 (reconciliation loops)
+│   │   ├── infrastructure/
+│   │   │   └── election/       # etcd Leader 选举
+│   │   └── interfaces/
+│   │       ├── grpc/           # gRPC 接口
+│   │       └── http/           # REST API
+│   └── worker/                 # Worker 服务
+│       ├── application/service/# Worker 执行引擎
+│       └── interfaces/
+│           └── middleware/     # 中间件 (日志/恢复/超时)
+├── pkg/                        # 通用工具包
+│   ├── log/                    # 结构化日志
+│   ├── metrics/                # Prometheus 指标
+│   ├── ratelimit/              # 令牌桶限流器
+│   ├── retry/                  # 指数退避重试
+│   └── signals/                # 信号处理
+├── api/proto/                  # Protobuf 定义
 ├── deploy/
-│   ├── kubernetes/      # K8s 原生 YAML
-│   └── helm/            # Helm Chart
-├── internal/version/    # 版本信息
-├── config.yaml          # 示例配置
-├── Dockerfile           # 多阶段构建
-└── Makefile             # 构建自动化
+│   ├── kubernetes/             # K8s 原生 YAML
+│   └── helm/                   # Helm Chart
+├── config.yaml                 # 示例配置
+├── Dockerfile                  # 多阶段构建
+└── Makefile                    # 构建自动化
 ```
 
 ## 快速开始

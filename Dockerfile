@@ -1,5 +1,5 @@
 # ---- Build stage ----
-FROM golang:1.22-alpine AS builder
+FROM golang:1.25-alpine AS builder
 
 RUN apk add --no-cache git ca-certificates tzdata
 
@@ -18,9 +18,9 @@ ARG COMPONENT=scheduler
 
 RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build \
     -ldflags "-s -w \
-      -X github.com/dispatchhub/dispatchhub/internal/version.Version=${VERSION} \
-      -X github.com/dispatchhub/dispatchhub/internal/version.GitCommit=${GIT_COMMIT} \
-      -X github.com/dispatchhub/dispatchhub/internal/version.BuildDate=${BUILD_DATE}" \
+      -X github.com/dispatchhub/dispatchhub/internal/shared/infrastructure/version.Version=${VERSION} \
+      -X github.com/dispatchhub/dispatchhub/internal/shared/infrastructure/version.GitCommit=${GIT_COMMIT} \
+      -X github.com/dispatchhub/dispatchhub/internal/shared/infrastructure/version.BuildDate=${BUILD_DATE}" \
     -o /bin/dispatchhub-${COMPONENT} ./cmd/${COMPONENT}
 
 # ---- Runtime stage ----

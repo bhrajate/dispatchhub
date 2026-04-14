@@ -2,9 +2,9 @@ VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo "dev
 GIT_COMMIT ?= $(shell git rev-parse --short HEAD 2>/dev/null || echo "unknown")
 BUILD_DATE ?= $(shell date -u +"%Y-%m-%dT%H:%M:%SZ")
 LDFLAGS := -s -w \
-	-X github.com/dispatchhub/dispatchhub/internal/version.Version=$(VERSION) \
-	-X github.com/dispatchhub/dispatchhub/internal/version.GitCommit=$(GIT_COMMIT) \
-	-X github.com/dispatchhub/dispatchhub/internal/version.BuildDate=$(BUILD_DATE)
+	-X github.com/dispatchhub/dispatchhub/internal/shared/infrastructure/version.Version=$(VERSION) \
+	-X github.com/dispatchhub/dispatchhub/internal/shared/infrastructure/version.GitCommit=$(GIT_COMMIT) \
+	-X github.com/dispatchhub/dispatchhub/internal/shared/infrastructure/version.BuildDate=$(BUILD_DATE)
 
 REGISTRY ?= dispatchhub
 COMPONENTS := scheduler worker apiserver

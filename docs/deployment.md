@@ -30,7 +30,7 @@
 
 | 组件 | 最低版本 | 推荐配置 |
 |------|---------|---------|
-| Go | 1.22+ | 编译用 |
+| Go | 1.25+ | 编译用 |
 | Redis | 7.0+ | 单机或 Cluster 模式 |
 | etcd | 3.5+ | 3 节点集群 |
 | MySQL | 8.0+ | 主从/MGR |
@@ -81,7 +81,7 @@ make run-scheduler
 # 终端 2: 启动 Worker
 make run-worker
 
-# 终端 3: 启动 API Server（可选，scheduler 已包含 API）
+# 终端 3: 启动 API Server（系统唯一的外部 API 入口）
 make run-apiserver
 ```
 
@@ -118,7 +118,7 @@ make docker-apiserver
 
 ### Dockerfile 特点
 
-- **多阶段构建**：编译阶段使用 `golang:1.22-alpine`，运行阶段使用 `alpine:3.19`
+- **多阶段构建**：编译阶段使用 `golang:1.25-alpine`，运行阶段使用 `alpine:3.19`
 - **静态二进制**：`CGO_ENABLED=0`，无外部依赖
 - **非 root 用户**：使用 `dispatchhub` 用户运行
 - **版本注入**：通过 `--build-arg` 注入 Version/GitCommit/BuildDate
@@ -182,8 +182,7 @@ spec:
       containers:
         - name: scheduler
           ports:
-            - containerPort: 8080      # HTTP API
-            - containerPort: 9090      # gRPC API
+            - containerPort: 8080      # 运维端点 (healthz/readyz/metrics)
             - containerPort: 9091      # Prometheus Metrics
           livenessProbe:
             httpGet:

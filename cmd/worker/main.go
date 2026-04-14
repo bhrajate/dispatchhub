@@ -2,20 +2,23 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"flag"
 	"fmt"
+	"net/http"
 	"os"
 
-	"github.com/dispatchhub/dispatchhub/internal/version"
-	"github.com/dispatchhub/dispatchhub/pkg/config"
+	"github.com/dispatchhub/dispatchhub/internal/shared/domain/entity"
+	"github.com/dispatchhub/dispatchhub/internal/shared/infrastructure/config"
+	etcdstore "github.com/dispatchhub/dispatchhub/internal/shared/infrastructure/persistence/etcd"
+	mysqlstore "github.com/dispatchhub/dispatchhub/internal/shared/infrastructure/persistence/mysql"
+	redisstore "github.com/dispatchhub/dispatchhub/internal/shared/infrastructure/persistence/redis"
+	"github.com/dispatchhub/dispatchhub/internal/shared/infrastructure/version"
+	workerservice "github.com/dispatchhub/dispatchhub/internal/worker/application/service"
+	"github.com/dispatchhub/dispatchhub/internal/worker/interfaces/middleware"
 	"github.com/dispatchhub/dispatchhub/pkg/log"
-	"github.com/dispatchhub/dispatchhub/pkg/middleware"
 	"github.com/dispatchhub/dispatchhub/pkg/signals"
-	"github.com/dispatchhub/dispatchhub/pkg/types"
-	"github.com/dispatchhub/dispatchhub/pkg/worker"
-	etcdstore "github.com/dispatchhub/dispatchhub/pkg/store/etcd"
-	mysqlstore "github.com/dispatchhub/dispatchhub/pkg/store/mysql"
-	redisstore "github.com/dispatchhub/dispatchhub/pkg/store/redis"
+	"github.com/prometheus/client_golang/prometheus/promhttp"
 
 	goredis "github.com/redis/go-redis/v9"
 	clientv3 "go.etcd.io/etcd/client/v3"
@@ -53,10 +56,9 @@ func main() {
 	defer log.Sync()
 
 	log.Info(version.Info())
-
 	ctx := signals.SetupSignalContext()
 
-	// etcd
+	// --- Infrastructure ---
 	etcdClient, err := clientv3.New(clientv3.Config{
 		Endpoints:   cfg.Etcd.Endpoints,
 		DialTimeout: cfg.Etcd.DialTimeout,
@@ -66,7 +68,6 @@ func main() {
 	}
 	defer etcdClient.Close()
 
-	// Redis
 	var redisClient goredis.UniversalClient
 	if cfg.Redis.ClusterMode {
 		redisClient = goredis.NewClusterClient(&goredis.ClusterOptions{
@@ -86,51 +87,84 @@ func main() {
 	}
 	defer redisClient.Close()
 
-	// MySQL
 	db, err := gorm.Open(mysql.Open(cfg.MySQL.DSN), &gorm.Config{})
 	if err != nil {
 		log.Fatalf("connect mysql: %v", err)
 	}
-	sqlDB, _ := db.DB()
+	sqlDB, err := db.DB()
+	if err != nil {
+		log.Fatalf("get sql.DB: %v", err)
+	}
 	sqlDB.SetMaxOpenConns(cfg.MySQL.MaxOpenConns)
 	sqlDB.SetMaxIdleConns(cfg.MySQL.MaxIdleConns)
 	sqlDB.SetConnMaxLifetime(cfg.MySQL.ConnMaxLifetime)
 	defer sqlDB.Close()
 
-	// Build stores
+	// --- Repositories (shared infrastructure) ---
 	broker := redisstore.NewQueueBroker(redisClient)
-	registry := etcdstore.NewRegistry(etcdClient)
-	taskStore, err := mysqlstore.NewTaskStore(db)
+	registry := etcdstore.NewWorkerRegistry(etcdClient)
+	taskRepo, err := mysqlstore.NewTaskRepository(db)
 	if err != nil {
-		log.Fatalf("init task store: %v", err)
+		log.Fatalf("init task repository: %v", err)
 	}
 
-	// Build worker
-	w := worker.New(cfg.Worker, broker, registry, taskStore)
+	// --- Worker application service ---
+	w := workerservice.NewWorkerAppService(
+		workerservice.WorkerConfig{
+			ID:                cfg.Worker.ID,
+			Queues:            cfg.Worker.Queues,
+			Concurrency:       cfg.Worker.Concurrency,
+			HeartbeatInterval: cfg.Worker.HeartbeatInterval,
+			ShutdownTimeout:   cfg.Worker.ShutdownTimeout,
+			TaskTimeout:       cfg.Worker.TaskTimeout,
+		},
+		broker, registry, taskRepo,
+	)
 
-	// Apply middleware
+	// --- Worker middleware (interfaces layer) ---
 	w.Use(
 		middleware.Recovery(),
 		middleware.Logging(),
 		middleware.Timeout(cfg.Worker.TaskTimeout),
 	)
 
-	// Register example handlers (in production, these would be loaded dynamically or from plugins)
-	w.RegisterFunc("example.echo", func(ctx context.Context, task *types.Task) *types.TaskResult {
-		return &types.TaskResult{Output: string(task.Payload)}
+	// Register example handlers
+	w.RegisterFunc("example.echo", func(ctx context.Context, task *entity.Task) *entity.TaskResult {
+		return &entity.TaskResult{Output: string(task.Payload)}
 	})
 
-	w.RegisterFunc("example.sleep", func(ctx context.Context, task *types.Task) *types.TaskResult {
-		select {
-		case <-ctx.Done():
-			return &types.TaskResult{Error: ctx.Err()}
+	w.RegisterFunc("example.sleep", func(ctx context.Context, task *entity.Task) *entity.TaskResult {
+		<-ctx.Done()
+		return &entity.TaskResult{Error: ctx.Err()}
+	})
+
+	// --- Internal ops server (health + metrics only) ---
+	opsMux := http.NewServeMux()
+	opsMux.Handle("GET /metrics", promhttp.Handler())
+	opsMux.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
+	})
+	opsMux.HandleFunc("GET /readyz", func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]string{"status": "ready"})
+	})
+
+	opsServer := &http.Server{
+		Addr:    cfg.Server.HTTPAddr,
+		Handler: opsMux,
+	}
+	go func() {
+		log.Infof("worker ops server listening on %s", cfg.Server.HTTPAddr)
+		if err := opsServer.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+			log.Errorf("ops server: %v", err)
 		}
-	})
+	}()
 
-	// Run the worker (blocks until shutdown)
 	if err := w.Run(ctx); err != nil {
 		log.Fatalf("worker: %v", err)
 	}
 
+	_ = opsServer.Shutdown(context.Background())
 	log.Info("worker shutdown complete")
 }

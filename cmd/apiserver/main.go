@@ -5,27 +5,27 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/dispatchhub/dispatchhub/internal/version"
-	"github.com/dispatchhub/dispatchhub/pkg/config"
+	apiservergrpc "github.com/dispatchhub/dispatchhub/internal/apiserver/interfaces/grpc"
+	apiserverhttp "github.com/dispatchhub/dispatchhub/internal/apiserver/interfaces/http"
+	"github.com/dispatchhub/dispatchhub/internal/shared/domain/entity"
+	apisvc "github.com/dispatchhub/dispatchhub/internal/apiserver/domain/service"
+	"github.com/dispatchhub/dispatchhub/internal/shared/infrastructure/config"
+	mysqlstore "github.com/dispatchhub/dispatchhub/internal/shared/infrastructure/persistence/mysql"
+	redisstore "github.com/dispatchhub/dispatchhub/internal/shared/infrastructure/persistence/redis"
+	"github.com/dispatchhub/dispatchhub/internal/shared/infrastructure/version"
 	"github.com/dispatchhub/dispatchhub/pkg/log"
-	"github.com/dispatchhub/dispatchhub/pkg/scheduler"
+	"github.com/dispatchhub/dispatchhub/pkg/metrics"
+	"github.com/dispatchhub/dispatchhub/pkg/ratelimit"
 	"github.com/dispatchhub/dispatchhub/pkg/signals"
-	etcdstore "github.com/dispatchhub/dispatchhub/pkg/store/etcd"
-	mysqlstore "github.com/dispatchhub/dispatchhub/pkg/store/mysql"
-	redisstore "github.com/dispatchhub/dispatchhub/pkg/store/redis"
-
-	grpcapi "github.com/dispatchhub/dispatchhub/pkg/api/grpc"
-	httpapi "github.com/dispatchhub/dispatchhub/pkg/api/http"
 
 	goredis "github.com/redis/go-redis/v9"
-	clientv3 "go.etcd.io/etcd/client/v3"
 	"gorm.io/driver/mysql"
 	"gorm.io/gorm"
 )
 
 // apiserver is a stateless API gateway that can be horizontally scaled.
 // It does not participate in leader election — it simply exposes the
-// HTTP/gRPC API and delegates to the scheduler + stores.
+// HTTP/gRPC API and delegates to the shared TaskService + repositories.
 func main() {
 	var (
 		configFile  string
@@ -58,16 +58,7 @@ func main() {
 	log.Info(version.Info())
 	ctx := signals.SetupSignalContext()
 
-	// Infrastructure
-	etcdClient, err := clientv3.New(clientv3.Config{
-		Endpoints:   cfg.Etcd.Endpoints,
-		DialTimeout: cfg.Etcd.DialTimeout,
-	})
-	if err != nil {
-		log.Fatalf("connect etcd: %v", err)
-	}
-	defer etcdClient.Close()
-
+	// --- Infrastructure ---
 	var redisClient goredis.UniversalClient
 	if cfg.Redis.ClusterMode {
 		redisClient = goredis.NewClusterClient(&goredis.ClusterOptions{
@@ -89,27 +80,52 @@ func main() {
 	if err != nil {
 		log.Fatalf("connect mysql: %v", err)
 	}
-	sqlDB, _ := db.DB()
+	sqlDB, err := db.DB()
+	if err != nil {
+		log.Fatalf("get sql.DB: %v", err)
+	}
+	sqlDB.SetMaxOpenConns(cfg.MySQL.MaxOpenConns)
+	sqlDB.SetMaxIdleConns(cfg.MySQL.MaxIdleConns)
+	sqlDB.SetConnMaxLifetime(cfg.MySQL.ConnMaxLifetime)
 	defer sqlDB.Close()
 
+	// --- Repositories (shared infrastructure) ---
 	broker := redisstore.NewQueueBroker(redisClient)
-	registry := etcdstore.NewRegistry(etcdClient)
-	taskStore, err := mysqlstore.NewTaskStore(db)
+	taskRepo, err := mysqlstore.NewTaskRepository(db)
 	if err != nil {
-		log.Fatalf("init task store: %v", err)
+		log.Fatalf("init task repository: %v", err)
 	}
 
-	sched := scheduler.New(cfg.Scheduler, broker, taskStore, registry)
+	// --- Shared TaskService ---
+	taskSvc := apisvc.NewTaskServiceImpl(broker, taskRepo)
 
-	// Start servers
-	grpcServer := grpcapi.NewServer(sched)
+	// Rate limiting (per-queue token bucket)
+	limiter := ratelimit.NewMultiQueueLimiter(1000, 1000) // default: 1000 req/s per queue
+	taskSvc.SetBeforeSubmit(func(task *entity.Task) error {
+		if !limiter.Allow(task.QueueName) {
+			return fmt.Errorf("queue %s rate limit exceeded", task.QueueName)
+		}
+		return nil
+	})
+
+	// Logging + metrics
+	taskSvc.SetAfterSubmit(func(task *entity.Task) {
+		metrics.TasksSubmitted.WithLabelValues(
+			task.QueueName, task.Type, fmt.Sprintf("%d", task.Priority),
+		).Inc()
+		log.Infof("task submitted: id=%s type=%s queue=%s priority=%d",
+			task.ID, task.Type, task.QueueName, task.Priority)
+	})
+
+	// --- Apiserver interfaces ---
+	grpcServer := apiservergrpc.NewServer(taskSvc)
 	go func() {
 		if err := grpcServer.Serve(cfg.Server.GRPCAddr); err != nil {
 			log.Fatalf("gRPC server: %v", err)
 		}
 	}()
 
-	httpServer := httpapi.NewServer(sched, cfg.Server.HTTPAddr)
+	httpServer := apiserverhttp.NewServer(taskSvc, cfg.Server.HTTPAddr)
 	go func() {
 		if err := httpServer.Serve(); err != nil {
 			log.Errorf("HTTP server: %v", err)
