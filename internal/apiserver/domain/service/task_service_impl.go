@@ -80,14 +80,14 @@ func (s *TaskServiceImpl) SubmitTask(ctx context.Context, task *entity.Task) err
 		return fmt.Errorf("persist task: %w", err)
 	}
 
+	// Enqueue to Redis. If this fails, the task is still persisted in MySQL
+	// and the scheduler's compensate loop will re-enqueue it within 30 seconds.
+	// We intentionally do NOT return error here to avoid client retries
+	// that would create duplicate tasks.
 	if task.ScheduleAt != nil || task.Delay.Duration > 0 {
-		if err := s.broker.EnqueueDelayed(ctx, task.QueueName, task); err != nil {
-			return fmt.Errorf("enqueue delayed: %w", err)
-		}
+		_ = s.broker.EnqueueDelayed(ctx, task.QueueName, task)
 	} else {
-		if err := s.broker.Enqueue(ctx, task.QueueName, task); err != nil {
-			return fmt.Errorf("enqueue: %w", err)
-		}
+		_ = s.broker.Enqueue(ctx, task.QueueName, task)
 	}
 
 	// Post-submit hook (logging, metrics)

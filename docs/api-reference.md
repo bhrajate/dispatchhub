@@ -2,8 +2,10 @@
 
 DispatchHub 提供两种 API 接入方式：
 
-- **HTTP REST API**：端口 8080，适用于外部客户端和调试
-- **gRPC API**：端口 9090，适用于内部服务间高性能通信
+- **HTTP REST API** -- 默认端口 8080，适用于外部客户端和调试
+- **gRPC API** -- 默认端口 9090，适用于内部服务间高性能通信
+
+两套 API 功能完全对等，共 9 个操作：任务 4 个、队列 1 个、CronJob 4 个。
 
 ---
 
@@ -46,19 +48,19 @@ POST /api/v1/tasks
 }
 ```
 
-| 字段 | 类型 | 必填 | 默认值 | 说明 |
-|------|------|------|--------|------|
-| `name` | string | 否 | "" | 任务可读名称 |
-| `namespace` | string | 否 | "" | 命名空间 |
-| `group` | string | 否 | "" | 逻辑分组 |
-| `type` | string | **是** | - | Handler 类型标识 |
-| `payload` | object | 否 | null | 任务载荷（任意 JSON） |
-| `labels` | object | 否 | null | K8s 风格标签 |
-| `priority` | int | 否 | 5 | 优先级 1-10 |
-| `queue_name` | string | 否 | "default" | 目标队列 |
-| `max_retries` | int | 否 | 3 | 最大重试次数 |
-| `timeout` | string | 否 | "5m" | 执行超时（Go duration 格式） |
-| `delay` | string | 否 | "" | 延迟执行时长 |
+| 字段 | 类型 | 必填 | 说明 |
+|------|------|------|------|
+| `type` | string | **是** | Handler 类型标识 |
+| `name` | string | 否 | 任务可读名称 |
+| `namespace` | string | 否 | 命名空间 |
+| `group` | string | 否 | 逻辑分组 |
+| `payload` | object | 否 | 任务载荷（任意 JSON） |
+| `labels` | object | 否 | K8s 风格标签 |
+| `priority` | int | 否 | 优先级 1/5/8/10 |
+| `queue_name` | string | 否 | 目标队列 |
+| `max_retries` | int | 否 | 最大重试次数 |
+| `timeout` | string | 否 | 执行超时（Go duration 格式，如 `"30s"`、`"5m"`） |
+| `delay` | string | 否 | 延迟执行时长（Go duration 格式） |
 
 **响应** `201 Created`：
 
@@ -72,18 +74,16 @@ POST /api/v1/tasks
         "state": 0,
         "priority": 8,
         "queue_name": "high-priority",
-        "created_at": "2024-01-15T10:30:00Z",
-        ...
+        "created_at": "2024-01-15T10:30:00Z"
     }
 }
 ```
 
-**错误响应**：
-
 | 状态码 | 场景 |
 |--------|------|
+| 201 | 创建成功 |
 | 400 | 请求体格式错误或缺少 `type` 字段 |
-| 500 | 持久化或入队失败 |
+| 500 | 持久化或入队失败（错误信息不泄露内部细节） |
 
 ---
 
@@ -92,12 +92,6 @@ POST /api/v1/tasks
 ```
 GET /api/v1/tasks/{id}
 ```
-
-**路径参数**：
-
-| 参数 | 说明 |
-|------|------|
-| `id` | 任务 UUID |
 
 **响应** `200 OK`：
 
@@ -141,7 +135,7 @@ GET /api/v1/tasks?namespace=user-service&type=email.send&limit=20&offset=0
 | `group` | string | 按分组过滤 |
 | `type` | string | 按 Handler 类型过滤 |
 | `queue` | string | 按队列过滤 |
-| `limit` | int | 分页大小，默认 100 |
+| `limit` | int | 分页大小 |
 | `offset` | int | 分页偏移 |
 
 **响应** `200 OK`：
@@ -153,15 +147,12 @@ GET /api/v1/tasks?namespace=user-service&type=email.send&limit=20&offset=0
             "id": "...",
             "name": "...",
             "type": "email.send",
-            "state": 4,
-            ...
+            "state": 4
         }
     ],
     "total": 156
 }
 ```
-
-结果按 `priority DESC, created_at ASC` 排序。
 
 ---
 
@@ -184,7 +175,7 @@ POST /api/v1/tasks/{id}/cancel
 | 200 | 取消成功 |
 | 500 | 任务不存在或已处于终态 |
 
-> 注意：只能取消 Pending / Running / Retrying 状态的任务。已完成、已失败、已超时的任务不可取消。
+> 只能取消非终态的任务。已 Completed、Failed、Cancelled、Timeout 的任务不可取消。
 
 ---
 
@@ -195,12 +186,6 @@ POST /api/v1/tasks/{id}/cancel
 ```
 GET /api/v1/queues/{name}/stats
 ```
-
-**路径参数**：
-
-| 参数 | 说明 |
-|------|------|
-| `name` | 队列名称，如 `default`、`high-priority` |
 
 **响应** `200 OK`：
 
@@ -227,6 +212,108 @@ GET /api/v1/queues/{name}/stats
 
 ---
 
+### CronJob 管理
+
+#### 创建 CronJob
+
+```
+POST /api/v1/cronjobs
+```
+
+**请求体**：
+
+```json
+{
+    "name": "daily-report",
+    "namespace": "analytics",
+    "type": "report.generate",
+    "payload": {"format": "pdf"},
+    "labels": {"team": "data"},
+    "cron_expr": "0 2 * * *",
+    "queue_name": "batch",
+    "priority": 5,
+    "max_retries": 3,
+    "timeout": "10m",
+    "retry_backoff": "1s"
+}
+```
+
+| 字段 | 类型 | 必填 | 说明 |
+|------|------|------|------|
+| `type` | string | **是** | Handler 类型标识 |
+| `cron_expr` | string | **是** | cron 表达式（如 `"*/5 * * * *"`、`"0 2 * * *"`） |
+| `name` | string | 否 | 可读名称 |
+| `namespace` | string | 否 | 命名空间 |
+| `payload` | object | 否 | 任务载荷 |
+| `labels` | object | 否 | 标签 |
+| `queue_name` | string | 否 | 目标队列 |
+| `priority` | int | 否 | 优先级 |
+| `max_retries` | int | 否 | 最大重试次数 |
+| `timeout` | string | 否 | 执行超时 |
+| `retry_backoff` | string | 否 | 重试退避时长 |
+
+**响应** `201 Created`：返回完整的 CronJob 对象（含计算好的 `next_run_at`）。
+
+| 状态码 | 场景 |
+|--------|------|
+| 201 | 创建成功 |
+| 400 | 缺少 `type`/`cron_expr`，或 cron 表达式无效 |
+| 500 | 持久化失败 |
+
+---
+
+#### 查询 CronJob
+
+```
+GET /api/v1/cronjobs/{id}
+```
+
+| 状态码 | 场景 |
+|--------|------|
+| 200 | 成功 |
+| 404 | CronJob 不存在 |
+
+---
+
+#### 列出 CronJob
+
+```
+GET /api/v1/cronjobs?namespace=analytics&limit=20&offset=0
+```
+
+| 参数 | 类型 | 说明 |
+|------|------|------|
+| `namespace` | string | 按命名空间过滤 |
+| `limit` | int | 分页大小（默认 100） |
+| `offset` | int | 分页偏移 |
+
+**响应** `200 OK`：
+
+```json
+{
+    "cron_jobs": [ ... ],
+    "total": 12
+}
+```
+
+---
+
+#### 删除 CronJob
+
+```
+DELETE /api/v1/cronjobs/{id}
+```
+
+**响应** `200 OK`：
+
+```json
+{
+    "status": "deleted"
+}
+```
+
+---
+
 ### 可观测性端点
 
 #### 健康检查
@@ -235,13 +322,7 @@ GET /api/v1/queues/{name}/stats
 GET /healthz
 ```
 
-**响应** `200 OK`：
-
-```json
-{"status": "ok"}
-```
-
-用于 Kubernetes livenessProbe，判断进程是否存活。
+返回 `{"status": "ok"}`，用于 Kubernetes livenessProbe，判断进程是否存活。始终返回 200（只要进程在运行）。
 
 #### 就绪检查
 
@@ -249,13 +330,12 @@ GET /healthz
 GET /readyz
 ```
 
-**响应** `200 OK`：
+返回 `{"status": "ready"}` 或 `{"status": "not ready", "error": "..."}`。用于 Kubernetes readinessProbe，实际检查 Redis 和 MySQL 连通性（3s 超时）。
 
-```json
-{"status": "ready"}
-```
-
-用于 Kubernetes readinessProbe，判断服务是否就绪接受流量。
+| 状态码 | 说明 |
+|--------|------|
+| 200 | 所有依赖就绪 |
+| 503 | 某个依赖不可用 |
 
 #### Prometheus 指标
 
@@ -263,7 +343,19 @@ GET /readyz
 GET /metrics
 ```
 
-返回 Prometheus 格式的指标数据，详见下方 [Prometheus 指标](#prometheus-指标) 章节。
+返回 Prometheus 格式的指标数据。
+
+---
+
+### 错误响应格式
+
+所有错误响应统一为以下格式，**不泄露内部实现细节**（SQL 语句、堆栈等仅记录到日志）：
+
+```json
+{
+    "error": "failed to submit task"
+}
+```
 
 ---
 
@@ -285,6 +377,12 @@ service DispatchService {
 
     // 队列操作
     rpc GetQueueStats(GetQueueStatsRequest) returns (GetQueueStatsResponse);
+
+    // CronJob 操作
+    rpc CreateCronJob(CreateCronJobRequest) returns (CreateCronJobResponse);
+    rpc GetCronJob(GetCronJobRequest)       returns (GetCronJobResponse);
+    rpc ListCronJobs(ListCronJobsRequest)   returns (ListCronJobsResponse);
+    rpc DeleteCronJob(DeleteCronJobRequest) returns (DeleteCronJobResponse);
 }
 ```
 
@@ -328,6 +426,43 @@ message Task {
 }
 ```
 
+#### CronJob
+
+```protobuf
+message CronJob {
+    string id = 1;
+    string name = 2;
+    string namespace = 3;
+    string type = 4;
+    bytes payload = 5;
+    map<string, string> labels = 6;
+    string cron_expr = 7;
+    string queue_name = 8;
+    TaskPriority priority = 9;
+    google.protobuf.Duration timeout = 10;
+    int32 max_retries = 11;
+    google.protobuf.Duration retry_backoff = 12;
+    bool enabled = 13;
+    google.protobuf.Timestamp last_run_at = 14;
+    google.protobuf.Timestamp next_run_at = 15;
+    google.protobuf.Timestamp created_at = 16;
+}
+```
+
+### 请求/响应消息
+
+| RPC | Request | Response |
+|-----|---------|----------|
+| SubmitTask | `TaskSpec spec` | `string task_id` + `Task task` |
+| GetTask | `string task_id` | `Task task` |
+| ListTasks | namespace, group, type, state, labels, queue_name, limit, offset | `repeated Task tasks` + `int64 total` |
+| CancelTask | `string task_id` | `Task task` |
+| GetQueueStats | `string queue_name` | queue_name, pending, active, scheduled, retrying, completed, failed |
+| CreateCronJob | name, namespace, type, payload, labels, cron_expr, queue_name, priority, timeout, max_retries, retry_backoff | `CronJob cron_job` |
+| GetCronJob | `string id` | `CronJob cron_job` |
+| ListCronJobs | namespace, limit, offset | `repeated CronJob cron_jobs` + `int64 total` |
+| DeleteCronJob | `string id` | (空消息) |
+
 ### 枚举类型
 
 #### TaskPriority
@@ -354,12 +489,14 @@ message Task {
 | TASK_STATE_CANCELLED | 7 |
 | TASK_STATE_TIMEOUT | 8 |
 
+> 注意：gRPC proto 中 TaskState 从 1 开始（0 为 UNSPECIFIED），Go 实体中 TaskState 从 0 开始（Pending=0）。两者在 gRPC handler 中进行转换。
+
 ### 附加 gRPC 服务
 
 | 服务 | 说明 |
 |------|------|
 | `grpc.health.v1.Health` | gRPC 标准健康检查 |
-| `grpc.reflection.v1` | 服务反射（开发调试用） |
+| `grpc.reflection.v1` | 服务反射（开发调试用，可通过 grpcurl 发现服务） |
 
 ---
 
@@ -394,12 +531,6 @@ message Task {
 | 指标名 | 类型 | 标签 | 说明 |
 |--------|------|------|------|
 | `dispatchhub_queue_depth` | Gauge | queue, state | 队列深度（pending/active/scheduled） |
-
-### Histogram Buckets
-
-- `schedule_latency_seconds`：指数分布，从 1ms 到约 32s
-- `loop_duration_seconds`：指数分布，从 0.1ms 到约 3.2s
-- `task_duration_seconds`：指数分布，从 10ms 到约 327s
 
 ### Grafana 查询示例
 

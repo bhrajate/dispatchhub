@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"sync"
 
 	"github.com/dispatchhub/dispatchhub/internal/shared/domain/entity"
 	"github.com/dispatchhub/dispatchhub/internal/shared/domain/repository"
@@ -19,6 +20,8 @@ const (
 // WorkerRegistry implements repository.WorkerRegistry using etcd.
 type WorkerRegistry struct {
 	client *clientv3.Client
+
+	mu     sync.RWMutex
 	leases map[string]clientv3.LeaseID
 }
 
@@ -47,7 +50,9 @@ func (r *WorkerRegistry) Register(ctx context.Context, worker *entity.WorkerInfo
 		return fmt.Errorf("put worker: %w", err)
 	}
 
+	r.mu.Lock()
 	r.leases[worker.ID] = grant.ID
+	r.mu.Unlock()
 
 	ch, err := r.client.KeepAlive(ctx, grant.ID)
 	if err != nil {
@@ -73,40 +78,35 @@ func (r *WorkerRegistry) Register(ctx context.Context, worker *entity.WorkerInfo
 }
 
 func (r *WorkerRegistry) Deregister(ctx context.Context, workerID string) error {
-	if leaseID, ok := r.leases[workerID]; ok {
-		_, _ = r.client.Revoke(ctx, leaseID)
+	r.mu.Lock()
+	leaseID, ok := r.leases[workerID]
+	if ok {
 		delete(r.leases, workerID)
+	}
+	r.mu.Unlock()
+
+	if ok {
+		_, _ = r.client.Revoke(ctx, leaseID)
 	}
 	_, err := r.client.Delete(ctx, workerKey(workerID))
 	return err
 }
 
-func (r *WorkerRegistry) Heartbeat(ctx context.Context, hb *entity.Heartbeat) error {
-	worker, err := r.GetWorker(ctx, hb.WorkerID)
-	if err != nil {
-		return err
-	}
-	if worker == nil {
-		return fmt.Errorf("worker %s not found", hb.WorkerID)
-	}
-
-	worker.State = hb.State
-	worker.ActiveTasks = hb.ActiveTasks
-	worker.CPUUsage = hb.CPUUsage
-	worker.MemUsage = hb.MemUsage
-	worker.LastHeartbeat = hb.Timestamp
-
+func (r *WorkerRegistry) Heartbeat(ctx context.Context, worker *entity.WorkerInfo) error {
 	data, err := json.Marshal(worker)
 	if err != nil {
 		return err
 	}
 
-	leaseID, ok := r.leases[hb.WorkerID]
+	r.mu.RLock()
+	leaseID, ok := r.leases[worker.ID]
+	r.mu.RUnlock()
+
 	if !ok {
-		return fmt.Errorf("no lease for worker %s", hb.WorkerID)
+		return fmt.Errorf("no lease for worker %s", worker.ID)
 	}
 
-	_, err = r.client.Put(ctx, workerKey(hb.WorkerID), string(data), clientv3.WithLease(leaseID))
+	_, err = r.client.Put(ctx, workerKey(worker.ID), string(data), clientv3.WithLease(leaseID))
 	return err
 }
 

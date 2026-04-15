@@ -1,6 +1,7 @@
 package entity
 
 import (
+	"database/sql/driver"
 	"encoding/json"
 	"fmt"
 	"time"
@@ -104,7 +105,37 @@ func (t *Task) CanRetry() bool {
 // Labels is a set of key-value pairs attached to a task (k8s-style).
 type Labels map[string]string
 
-// Duration wraps time.Duration for JSON serialization.
+// Value implements driver.Valuer for GORM MySQL serialization.
+func (l Labels) Value() (driver.Value, error) {
+	if l == nil {
+		return nil, nil
+	}
+	data, err := json.Marshal(l)
+	if err != nil {
+		return nil, fmt.Errorf("marshal labels: %w", err)
+	}
+	return string(data), nil
+}
+
+// Scan implements sql.Scanner for GORM MySQL deserialization.
+func (l *Labels) Scan(value any) error {
+	if value == nil {
+		*l = nil
+		return nil
+	}
+	var bytes []byte
+	switch v := value.(type) {
+	case string:
+		bytes = []byte(v)
+	case []byte:
+		bytes = v
+	default:
+		return fmt.Errorf("unsupported labels type: %T", value)
+	}
+	return json.Unmarshal(bytes, l)
+}
+
+// Duration wraps time.Duration for JSON and GORM serialization.
 type Duration struct {
 	time.Duration
 }
@@ -123,6 +154,32 @@ func (d *Duration) UnmarshalJSON(b []byte) error {
 		return err
 	}
 	d.Duration = dur
+	return nil
+}
+
+// Value implements driver.Valuer for GORM MySQL serialization (stores as nanoseconds).
+func (d Duration) Value() (driver.Value, error) {
+	return int64(d.Duration), nil
+}
+
+// Scan implements sql.Scanner for GORM MySQL deserialization (reads nanoseconds).
+func (d *Duration) Scan(value any) error {
+	if value == nil {
+		d.Duration = 0
+		return nil
+	}
+	switch v := value.(type) {
+	case int64:
+		d.Duration = time.Duration(v)
+	case float64:
+		d.Duration = time.Duration(int64(v))
+	case []byte:
+		n := int64(0)
+		fmt.Sscanf(string(v), "%d", &n)
+		d.Duration = time.Duration(n)
+	default:
+		return fmt.Errorf("unsupported duration type: %T", value)
+	}
 	return nil
 }
 

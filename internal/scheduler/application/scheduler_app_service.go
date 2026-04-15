@@ -22,6 +22,9 @@ type SchedulerAppConfig struct {
 	CompensateBatchSize    int
 	CronCheckInterval      time.Duration
 	CronBatchSize          int
+	CleanupInterval        time.Duration
+	CleanupOlderThan       time.Duration
+	CleanupBatchSize       int
 }
 
 // DefaultSchedulerAppConfig returns sensible defaults.
@@ -36,6 +39,9 @@ func DefaultSchedulerAppConfig() SchedulerAppConfig {
 		CompensateBatchSize:    100,
 		CronCheckInterval:      time.Second,
 		CronBatchSize:          100,
+		CleanupInterval:        time.Hour,
+		CleanupOlderThan:       7 * 24 * time.Hour, // 7 days
+		CleanupBatchSize:       1000,
 	}
 }
 
@@ -71,6 +77,7 @@ func (s *SchedulerAppService) Run(ctx context.Context) error {
 	go s.metricsLoop(ctx)
 	go s.compensateLoop(ctx)
 	go s.cronLoop(ctx)
+	go s.cleanupLoop(ctx)
 
 	<-ctx.Done()
 	log.Info("scheduler stopped")
@@ -113,7 +120,7 @@ func (s *SchedulerAppService) promoteDelayedLoop(ctx context.Context) {
 			return
 		case <-ticker.C:
 			for _, q := range s.domainSvc.Queues() {
-				if _, err := s.domainSvc.Broker().PromoteDelayed(ctx, q); err != nil {
+				if _, err := s.domainSvc.Broker().PromoteDelayed(ctx, q, 100); err != nil {
 					log.Errorf("promote delayed tasks in %s: %v", q, err)
 				}
 			}
@@ -197,6 +204,26 @@ func (s *SchedulerAppService) cronLoop(ctx context.Context) {
 				log.Errorf("trigger cron jobs: %v", err)
 			} else if n > 0 {
 				log.Infof("triggered %d cron jobs", n)
+			}
+		}
+	}
+}
+
+// cleanupLoop periodically deletes old terminal tasks to prevent unbounded table growth.
+func (s *SchedulerAppService) cleanupLoop(ctx context.Context) {
+	ticker := time.NewTicker(s.cfg.CleanupInterval)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			n, err := s.domainSvc.CleanupTerminalTasks(ctx, s.cfg.CleanupOlderThan, s.cfg.CleanupBatchSize)
+			if err != nil {
+				log.Errorf("cleanup terminal tasks: %v", err)
+			} else if n > 0 {
+				log.Infof("cleaned up %d old terminal tasks", n)
 			}
 		}
 	}

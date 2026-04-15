@@ -180,7 +180,8 @@ var promoteScript = redis.NewScript(`
 local delayed_key = KEYS[1]
 local ready_key = KEYS[2]
 local now = tonumber(ARGV[1])
-local tasks = redis.call('ZRANGEBYSCORE', delayed_key, '-inf', now, 'LIMIT', 0, 100)
+local batch = tonumber(ARGV[2])
+local tasks = redis.call('ZRANGEBYSCORE', delayed_key, '-inf', now, 'LIMIT', 0, batch)
 if #tasks == 0 then
     return 0
 end
@@ -193,11 +194,11 @@ end
 return #tasks
 `)
 
-func (q *QueueBroker) PromoteDelayed(ctx context.Context, queue string) (int64, error) {
+func (q *QueueBroker) PromoteDelayed(ctx context.Context, queue string, batchSize int) (int64, error) {
 	now := time.Now().UnixMilli()
 	result, err := promoteScript.Run(ctx, q.client,
 		[]string{delayedKeyFor(queue), readyKeyFor(queue)},
-		now,
+		now, batchSize,
 	).Int64()
 	if err != nil && err != redis.Nil {
 		return 0, err

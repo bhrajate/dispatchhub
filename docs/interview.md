@@ -1,229 +1,298 @@
-# DispatchHub 面试项目介绍逐字稿
+# DispatchHub 面试项目讲解
 
-> 基于 STAR 原则（Situation-Task-Action-Result）组织，预计讲述时间 8-12 分钟。标注【技术深挖点】的段落为面试官可能追问的方向，需要准备更深的回答。
-
----
-
-## 一、Situation（项目背景）
-
-> 面试官你好，我想介绍一下我做的一个项目——DispatchHub，这是一个云原生的分布式任务调度系统。
-
-项目的业务背景是这样的：我们需要处理大量异步任务，比如邮件发送、数据导出、报表生成、定时对账等场景。这些任务有几个共同特点：**量大**（日均百万级）、**有优先级差异**（比如交易对账的优先级要比营销邮件高得多）、**需要可靠执行**（不能丢任务、不能重复执行）。
-
-在做技术调研的时候，我发现市面上的方案要么是消息流平台（Kafka、RocketMQ），适合做事件驱动但不支持优先级排序；要么是简单的任务队列（基于 MySQL 轮询），功能够用但性能有天花板。所以我们决定自研一套，目标是同时满足**高并发**（10 万+ QPS）、**高可用**（故障自动切换）和**高性能**（亚毫秒级出队延迟）。
+> STAR 原则组织，8-12 分钟。标注【深挖】的段落为面试官可能追问的方向。
 
 ---
 
-## 二、Task（我的职责）
+## 一、Situation -- 项目背景
 
-我作为这个项目的核心开发者，负责**整体架构设计和核心模块的编码实现**。具体来说包括：
+DispatchHub 是一个云原生分布式任务调度系统，处理邮件发送、数据导出、报表生成、定时对账等异步任务。核心挑战：**量大**（日均百万级）、**有优先级差异**（交易对账优先级远高于营销邮件）、**需要可靠执行**（不能丢任务、不能重复执行）。
 
-1. 设计整体的控制面/数据面分离架构
-2. 实现基于 Redis Sorted Set + Lua 脚本的优先级队列
-3. 实现基于 etcd 的 Leader 选举和服务注册发现
-4. 设计 Worker 的拉模型执行引擎和背压控制机制
-5. 制定 Kubernetes 部署方案，包括 HPA 自动伸缩策略
+技术调研结论：Kafka/RocketMQ 不支持优先级排序；MySQL 轮询有并发锁瓶颈；Asynq 缺少控制面/数据面分离和双写补偿。决定自研，目标同时满足高并发、高可用、高性能。
 
 ---
 
-## 三、Action（核心技术方案与难点）
+## 二、Task -- 我的职责
 
-### 3.1 架构设计：控制面/数据面分离
+作为核心开发者，负责整体架构设计和核心模块编码：
 
-我借鉴了 Kubernetes 的设计哲学，把系统分成三层：
+1. 控制面/数据面分离的整体架构
+2. Redis Sorted Set + Lua 原子脚本的优先级队列
+3. etcd Leader 选举与 Worker 服务注册发现
+4. Worker 拉模型执行引擎与 channel 信号量背压
+5. MySQL-Redis 双写补偿机制
+6. CronJob 定时任务调度
+7. DDD 分层架构设计
+8. Kubernetes 部署方案，含 HPA 自动伸缩
 
-- **控制面（Scheduler）**：负责任务调度决策、延迟任务晋升、Worker 健康检查。部署 3 副本，通过 etcd Leader 选举保证**只有一个 Leader 在运行调度逻辑**，其余 Standby 节点随时待命。
-- **数据面（Worker）**：负责任务的实际执行，完全无状态，可以随意水平扩展。通过 Kubernetes HPA 根据 CPU 和活跃任务数自动在 3~50 个副本之间伸缩。
-- **接入层（API Server）**：系统唯一的外部入口，无状态 HTTP/gRPC 网关。Scheduler 和 Worker 仅暴露运维端点（healthz/readyz/metrics），不对外暴露任务管理 API。
+---
 
-存储层也做了职责分离——**Redis** 做队列热路径，负责入队出队这种高频操作；**MySQL** 做持久化冷路径，保存任务状态和审计日志；**etcd** 做协调层，负责 Leader 选举和 Worker 服务注册。
+## 三、Action -- 技术方案
 
-> **【技术深挖点：为什么要三层存储而不是用一个中间件搞定？】**
+### 3.1 架构：控制面/数据面分离
+
+借鉴 Kubernetes 设计哲学，三层分离：
+
+**控制面 -- Scheduler：** 负责调度决策。部署 3 副本，etcd `concurrency.Election` 保证单 Leader 运行，15s TTL Lease，Standby 随时接管。Leader 运行 7 个后台循环：延迟晋升（promoteDelayedLoop, 每 1s）、补偿扫描（compensateLoop, 每 30s）、CronJob 触发（cronLoop, 每 1s）、Worker 健康检查（healthCheckLoop, 每 10s）、任务清理（cleanupLoop, 每 1h, 删除 7 天前终态任务）、metrics 发布、Worker Watch。Scheduler 仅暴露 :8080 运维端口（healthz/readyz/metrics），不对外暴露 gRPC。
+
+**数据面 -- Worker：** 负责任务执行，完全无状态。Kubernetes HPA 根据 CPU 利用率和自定义指标 `dispatchhub_worker_active_tasks` 在 3-50 副本间伸缩。暴露 :8080（运维）和 :9091（metrics）。`terminationGracePeriodSeconds=60`，收到 SIGTERM 后停止拉取，等待 in-flight 任务完成（最多 30s ShutdownTimeout）。
+
+**接入层 -- API Server：** 系统唯一外部入口，无状态网关。暴露 :8080 HTTP + :9090 gRPC + :9091 metrics，前置 Ingress。2+ 副本水平扩展。Scheduler 和 Worker 不暴露任务管理 API，所有任务提交/查询/取消都通过 API Server。
+
+存储层职责分离：Redis 做队列热路径（入队/出队）、MySQL 做持久化冷路径（状态+审计）、etcd 做协调（选举+注册）。没有任何单一中间件能同时满足低延迟队列操作、持久化可靠性和强一致协调。
+
+> 【深挖：Scheduler 和 Worker 之间怎么通信？】
 >
-> 因为没有任何一个中间件能同时满足高频队列操作的低延迟、任务状态的持久化可靠性、和分布式协调的强一致性。Redis 快但内存有限且非严格持久化；MySQL 可靠但高并发出队有锁瓶颈；etcd 强一致但不适合存大量数据。三者各司其职才能覆盖所有需求。
+> **零直接通信。** Redis、etcd、MySQL 作为中间层完成所有协调。Scheduler 把任务放进 Redis 队列，Worker 从 Redis 拉取。Worker 通过 etcd 注册自身信息（ID/Hostname/Queues/负载），Scheduler 通过 Watch etcd 感知 Worker 上下线。这种设计让两者完全解耦，Worker 可以独立伸缩，Scheduler 完全不需要感知具体有哪些 Worker 在消费。
 
 ---
 
-### 3.2 核心难点一：队列选型——为什么选 Redis Sorted Set？
+### 3.2 队列选型：为什么选 Redis Sorted Set 而非消息队列
 
-这是整个项目**最关键的技术决策**。
+核心需求：**支持优先级排序的出队**。优先级为 10 的任务必须比优先级为 5 的先被取走。
 
-我的核心需求是：**支持优先级排序的出队**。简单来说就是同一个队列里，优先级为 10 的任务必须比优先级为 5 的先被取走，而不是先进先出。
+排除主流 MQ 的原因：
 
-这个需求直接排除了三个主流 MQ：
+| MQ | 排除原因 |
+|-----|---------|
+| Kafka | Partition 内严格 FIFO，消息位置不可变，高优先级无法插队 |
+| RocketMQ | 同 FIFO 模型，仅有延迟消息，不支持优先级 |
+| RabbitMQ | `x-max-priority` 受 prefetch 破坏（低优先级已预取到客户端缓冲区）；单机吞吐 2-5 万 QPS；Erlang 运维成本高 |
+| MySQL | `ORDER BY priority` 天然支持，但 `SELECT ... FOR UPDATE` 并发出队时锁竞争严重，50+ Worker 后 QPS 不升反降 |
 
-| MQ | 为什么不行 |
-|-----|-----------|
-| **Kafka** | Partition 内严格 FIFO，消息写入后位置不可变，高优先级消息无法插队 |
-| **RocketMQ** | 同样是 FIFO 模型，虽然有延迟消息但不支持优先级 |
-| **Pulsar** | 和 Kafka 同类，不支持优先级排序 |
+Redis Sorted Set 选型理由：
+- `score = -priority`，`ZPOPMIN` 取最小 score 即最高优先级，O(log N)
+- 延迟队列用独立 ZSET，`score = 执行时间戳`，`ZRANGEBYSCORE` 扫描到期任务
+- Lua 脚本把 ZPOPMIN + HSET（inflight 标记）合并为原子操作，Redis 单线程无竞态
+- 单机即可达 10 万+ QPS，Worker 数量增加对性能无影响
 
-那为什么不用 RabbitMQ？RabbitMQ 有 `x-max-priority` 参数，确实支持优先级队列。但有三个工程问题：一是 `prefetch` 机制会预取消息到客户端缓冲区，低优先级消息已经被预取了，高优先级消息来了也插不了队；二是单机吞吐只有 2~5 万 QPS，达到 10 万 QPS 需要较大集群；三是 Erlang 技术栈运维成本高。
+与业界一致：Asynq、Sidekiq、Bull 全部选择 Redis 作为默认后端。
 
-那 MySQL 呢？MySQL 的 `ORDER BY priority DESC` 天然支持优先级，但问题在于**并发出队时的锁竞争**。100 个 Worker 同时执行 `SELECT ... FOR UPDATE`，InnoDB 的行锁、间隙锁会严重退化性能。实测 Worker 超过 50 个后，QPS 不升反降，天花板大约在 5000 QPS。
-
-> **【技术深挖点：MySQL FOR UPDATE 的问题具体是什么？】**
+> 【深挖：MySQL FOR UPDATE 的具体问题？】
 >
-> 我可以展开说四个层面：
-> 1. **锁竞争热点**：所有 Worker 都在抢优先级最高的那几行，前 N 行成为热点，大量加锁/跳过操作消耗资源
-> 2. **间隙锁阻塞入队**：REPEATABLE READ 下 Next-Key Lock 不仅锁住行，还锁住索引间隙，导致新任务 INSERT 被出队的 SELECT FOR UPDATE 阻塞——入队和出队本应互不干扰
-> 3. **事务开销**：每次出队都要经历 BEGIN → 分配事务 ID → 索引扫描 → 行锁获取 → redo log fsync → COMMIT，即使是最简单的操作也有磁盘 I/O
-> 4. **空队列轮询**：队列空了 Worker 只能 sleep 后重试，100 个 Worker 每秒产生上千次无效 SELECT
-
-最终选择了 **Redis Sorted Set**。原因是 ZSET 在数据结构层面与任务调度完美对齐：
-
-- **score = -priority**，`ZPOPMIN` 取 score 最小值即最高优先级，O(log N) 复杂度
-- **延迟队列**用另一个 ZSET，score = 执行时间戳，通过 `ZRANGEBYSCORE` 扫描到期任务
-- **Lua 脚本**把 `ZPOPMIN`（出队）和 `HSET`（标记 inflight）合并为一个原子操作，Redis 单线程执行天然无竞态
-- 单机即可达到 **10 万+ QPS**，且 Worker 数量增加对 QPS 几乎无影响
-
-顺便说一下，这个选型方向和业界主流一致——Asynq、Sidekiq、Bull 这些知名任务队列框架全部选择 Redis 作为默认后端。
+> 四个层面：
+> 1. **锁竞争热点**：所有 Worker 抢优先级最高的前 N 行，大量加锁/跳过操作
+> 2. **间隙锁阻塞入队**：REPEATABLE READ 下 Next-Key Lock 锁住索引间隙，新任务 INSERT 被出队的 SELECT FOR UPDATE 阻塞。入队和出队本应互不干扰
+> 3. **事务开销**：每次出队 BEGIN -> 事务 ID -> 索引扫描 -> 行锁 -> redo log fsync -> COMMIT，即使最简单操作也有磁盘 I/O
+> 4. **空队列轮询**：队列空时 100 个 Worker 每秒产生上千次无效 SELECT
 
 ---
 
-### 3.3 核心难点二：Lua 原子出队——如何避免任务被重复消费？
+### 3.3 Lua 原子出队：防止重复消费
 
-分布式场景下最怕的就是**一个任务被两个 Worker 同时拿走**。我通过 Redis Lua 脚本实现了原子出队：
+分布式场景下最怕一个任务被两个 Worker 同时取走。通过 Lua 脚本实现原子出队：
 
 ```lua
--- 原子操作：从 ready 队列弹出 + 放入 inflight 追踪
-local task = redis.call('ZPOPMIN', KEYS[1])  -- 从就绪队列弹出最高优先级
-if #task == 0 then return nil end
-redis.call('HSET', KEYS[2], task[1], task[1]) -- 放入 inflight Hash
-return task[1]
+-- dequeueScript: 遍历多个队列, ZPOPMIN + HSET inflight 原子完成
+local queues = KEYS
+for i, queue_key in ipairs(queues) do
+    local result = redis.call('ZPOPMIN', queue_key, 1)
+    if #result > 0 then
+        local data = result[1]
+        local task = cjson.decode(data)
+        local inflight_key = string.gsub(queue_key, ':ready', ':inflight')
+        redis.call('HSET', inflight_key, task.id, data)
+        return data
+    end
+end
+return nil
 ```
 
-关键点在于：Redis 是**单线程执行模型**，Lua 脚本在执行期间不会被其他命令打断。所以 `ZPOPMIN` 和 `HSET` 要么全部执行，要么全部不执行，不存在"弹出了但没标记"的中间状态。
+Redis 单线程执行 Lua 脚本，ZPOPMIN 和 HSET 之间不会被其他命令打断。弹出后立即从 ZSET 删除 + 放入 inflight Hash，不存在"弹出了但没标记"的中间状态。
 
-inflight Hash 的作用是追踪正在执行的任务。Worker 完成后调用 `Ack` 删除 inflight 记录；如果 Worker 崩溃了，Scheduler 的健康检查会发现该 Worker 超时，然后把它 inflight 中的任务重新放回就绪队列——这就实现了 **at-least-once** 的投递语义。
+inflight Hash 追踪正在执行的任务：Worker 完成后 Ack 删除记录；Worker 崩溃则 Scheduler 健康检查发现超时，将 inflight 中的任务重新放回 ready 队列，实现 at-least-once 语义。
 
-> **【技术深挖点：Lua 脚本的性能问题？】**
+> 【深挖：Lua 脚本性能问题？】
 >
-> Lua 脚本在 Redis 单线程中执行，如果脚本太长会阻塞其他请求。所以我严格控制每个 Lua 脚本的复杂度，出队脚本只有 2 个 Redis 命令，延迟晋升脚本限制每次最多处理 100 个任务。此外在 Redis Cluster 模式下，Lua 脚本操作的 Key 必须在同一个 slot，我通过 Hash Tag（在 Key 名中加 `{queue_name}`）来保证。
+> Lua 在 Redis 单线程中执行，长脚本会阻塞其他请求。做法：严格控制每个 Lua 脚本复杂度（出队脚本仅 2-3 个 Redis 命令）；延迟晋升脚本限制每次最多处理 100 个任务。Redis Cluster 模式下，Lua 操作的 Key 必须在同一个 slot，通过 Hash Tag（`{queue_name}`）保证。
 
 ---
 
-### 3.4 核心难点三：Worker 背压控制——如何防止过载？
+### 3.4 MySQL-Redis 双写补偿
 
-Worker 采用**拉模型**（Pull），而不是 Scheduler 推任务过来。好处是 Worker 可以根据自身处理能力控制消费速度，天然具备**背压能力**。
+任务提交先写 MySQL 再写 Redis，两步非原子。Redis 写失败时任务卡在 MySQL Pending 状态，Worker 永远取不到。
 
-具体实现是一个**基于 channel 的协程池 + 信号量模式**：
+**补偿机制 (compensateLoop)：**
 
+1. 每 30 秒扫描 MySQL 中 `state=Pending AND updated_at < now()-30s` 的任务（留足正常入队的时间窗口）
+2. 对每个疑似孤儿任务，执行 `EnqueueIfNotInflight` Lua 脚本原子检查：
+   - 任务 ID 在 inflight Hash 中 -> 跳过（Worker 已取走正在处理）
+   - 不在 inflight 中 -> ZADD 到 ready 队列（真正的孤儿，补偿入队）
+3. 补偿成功后调用 `TouchUpdatedAt` 刷新 updated_at（不递增 version），防止下轮扫描重复命中，同时保证 Worker 拿到的 version 仍然有效
+
+```lua
+-- enqueueIfNotInflightScript
+local inflight_key = KEYS[1]
+local ready_key = KEYS[2]
+local task_id = ARGV[1]
+local score = tonumber(ARGV[2])
+local data = ARGV[3]
+if redis.call('HEXISTS', inflight_key, task_id) == 1 then
+    return 0  -- 在 inflight 中, 跳过
+end
+redis.call('ZADD', ready_key, score, data)
+return 1  -- 补偿入队成功
 ```
-fetchLoop 循环:
-  1. 往 sem channel 写入一个 token（如果 channel 满了就阻塞 → 停止从 Redis 取任务）
-  2. 从 Redis Dequeue 取一个任务
-  3. 起一个 goroutine 执行任务，执行完后从 sem channel 读出 token（释放一个位置）
-```
-
-channel 的容量就是最大并发数（默认 100）。当 100 个 goroutine 都在忙的时候，fetchLoop 阻塞在 step 1，Redis 中的任务安全地留在队列里不会丢失，等有空闲 goroutine 了再继续取。
-
-这比传统的固定线程池方案更优雅——没有拒绝策略的复杂度，也不需要估算队列缓冲区大小。**满了就不取，腾出来就继续**，非常简洁。
-
-> **【技术深挖点：为什么用 Pull 不用 Push？】**
->
-> Push 模式下 Scheduler 需要知道每个 Worker 的负载情况才能做推送决策，这引入了额外的状态同步开销。而且 Worker 崩溃后，已经推出去的任务可能丢失。Pull 模式下任务一直在 Redis 队列中，Worker 崩溃了其他 Worker 照样能取走，天然容错。新 Worker 上线后立即开始拉取，Scheduler 完全不需要感知——弹性伸缩变得非常自然。
-
----
-
-### 3.5 核心难点四：Leader 选举与故障转移
-
-Scheduler 是有状态的——延迟任务晋升、Worker 健康检查这些操作如果多个实例同时跑，会导致重复调度。所以我用 etcd 的 `concurrency.Election` 实现了 Leader 选举。
-
-核心机制：
-
-1. 3 个 Scheduler 副本同时 Campaign（竞选），只有一个当选 Leader
-2. Leader 获得一个 **15 秒 TTL 的 etcd Lease**，每 5 秒续约一次
-3. 只有 Leader 运行调度循环（延迟晋升、健康检查、指标发布）
-4. 如果 Leader 崩溃，Lease 到期不续约，**15 秒内** Standby 会自动竞选接管
-
-为什么选 etcd 而不是 ZooKeeper？因为 etcd 是 Kubernetes 的核心组件，和我们的云原生技术栈一致；它基于 gRPC 的 Watch 机制比 ZK 的 Watcher 更简洁；Lease 机制天然支持临时注册，不需要手动清理过期节点。
-
-> **【技术深挖点：Leader 切换期间任务会丢失吗？】**
->
-> 不会。Leader 只负责"调度决策"（比如把延迟任务晋升到就绪队列），不负责任务执行。任务本身在 Redis 队列里，Worker 的拉取完全不依赖 Scheduler。所以 Leader 切换的 15 秒窗口内，唯一的影响是延迟任务的晋升可能会延后几秒，但不会丢任务，已经在执行中的任务也不受影响。
-
----
-
-### 3.6 核心难点五：MySQL-Redis 双写一致性补偿
-
-任务提交时先写 MySQL 再写 Redis，这两步不是原子的。如果 MySQL 写成功但 Redis 写失败，任务会永远卡在 Pending 状态——MySQL 有记录但 Redis 队列里没有，Worker 永远取不到它。
-
-我通过 Scheduler 的**补偿扫描循环**解决了这个问题：
-
-1. 每 30 秒扫描 MySQL 中 `state=Pending AND updated_at < now()-30s` 的任务（给正常入队留足时间窗口）
-2. 对每个疑似孤儿任务，通过 Lua 脚本**原子检查** Redis inflight Hash：
-   - 如果任务 ID 在 inflight 中 → 跳过（Worker 已取走正在处理，只是还没更新 MySQL）
-   - 如果不在 inflight 中 → ZADD 到 ready 队列（真正的孤儿，补偿入队）
-3. 补偿成功后 Update 任务刷新 `updated_at`，防止下次扫描重复命中
 
 关键设计点：
-- **ZADD 幂等性**：如果任务已经在 ready 队列中（正常入队成功的情况），重复 ZADD 相同 member 是 no-op
-- **Lua 原子检查**：`HEXISTS inflight + ZADD ready` 在 Redis 单线程中原子执行，不会出现"检查时不在 inflight，ZADD 前被 Worker 取走"的竞态
-- **时间窗口保护**：只扫描 30 秒前的任务，避免把正在正常入队流程中的任务误判为孤儿
+- **ZADD 幂等**：任务已在 ready 队列时重复 ZADD 同一 member 是 no-op
+- **Lua 原子检查**：HEXISTS + ZADD 在 Redis 单线程中原子执行，不存在"检查时不在 inflight，ZADD 前被 Worker 取走"的竞态
+- **时间窗口保护**：只扫描 30 秒前的任务，避免误判正在正常入队流程中的任务
 
-> **【技术深挖点：为什么不用分布式事务？】**
+> 【深挖：为什么不用分布式事务？】
 >
-> XA 事务或 TCC 模式会把 MySQL 和 Redis 绑定在一个事务边界内，代价是每次提交都多一轮网络往返和协调开销。对于 10 万+ QPS 的场景，这个代价不可接受。补偿扫描是**最终一致**的方案——正常路径零额外开销，异常路径通过后台补偿兜底，对性能的影响几乎为零。
+> XA/TCC 把 MySQL 和 Redis 绑定在一个事务边界内，每次提交多一轮协调，10 万+ QPS 场景代价不可接受。补偿扫描是最终一致方案：正常路径零额外开销，异常路径后台补偿兜底。实际上代码中 Redis 入队失败时故意不返回 error（`_ = s.broker.Enqueue(...)`），避免客户端重试产生重复任务，由补偿循环在 30 秒内恢复。
 
 ---
 
-### 3.7 其他关键设计
+### 3.5 Worker 背压控制
 
-**任务生命周期管理**：设计了 8 个状态（Pending → Scheduled → Running → Completed/Failed/Timeout/Retrying/Cancelled），通过 MySQL 的 Version 字段做乐观锁，防止并发状态更新冲突。
+Worker 采用 Pull 模型，通过 **channel 信号量**控制并发：
 
-**指数退避重试**：失败任务的重试间隔按 `baseDelay × 2^retryCount` 指数增长，并叠加 25% 的随机抖动（jitter），避免大量失败任务在同一时刻重试造成**惊群效应**。
+```
+fetchLoop:
+  1. sem <- struct{}{}    // 往 channel 写 token，channel 满则阻塞（停止从 Redis 取任务）
+  2. Dequeue()            // 从 Redis 取一个任务
+  3. go process(task)     // 起 goroutine 执行，完成后 <-sem 释放位置
+```
 
-**Worker 中间件链**：参考洋葱模型设计了可插拔的中间件——Recovery（捕获 panic）、Logging（记录执行耗时）、Timeout（超时控制）。业务 Handler 只需关注业务逻辑，横切关注点由中间件统一处理。
+channel 容量 = 最大并发数（默认 100，可通过 `worker.concurrency` 配置）。100 个 goroutine 全忙时 fetchLoop 阻塞在 step 1，Redis 中的任务安全留在队列。**满了就不取，腾出来就继续。**
 
-**优雅停机**：Worker 收到 SIGTERM 后停止从队列拉取新任务，等待已有的 in-flight 任务完成（最多 30 秒），然后优雅退出。配合 Kubernetes 的 `terminationGracePeriodSeconds: 60s`，保证滚动更新时不丢任务。
+空队列时指数退避（100ms -> 200ms -> 400ms -> ... -> 2s cap），避免空轮询消耗 Redis 连接。取到任务后立即 reset backoff。
+
+> 【深挖：为什么用 Pull 不用 Push？】
+>
+> Push 模式下 Scheduler 需要知道每个 Worker 的负载才能推送，引入状态同步开销。Worker 崩溃时已推出去的任务可能丢失。Pull 模式下任务一直在 Redis 队列中，Worker 崩溃后其他 Worker 照常取走。新 Worker 上线立即开始拉取，Scheduler 完全不需要感知。弹性伸缩变得自然。
 
 ---
 
-## 四、Result（项目成果）
+### 3.6 Leader 选举与故障转移
 
-1. **性能指标**：队列入队/出队达到 **10 万+ QPS**，单次出队延迟 P99 < 1ms，满足高并发场景需求
-2. **高可用**：Scheduler Leader 故障切换时间 < 15 秒，Worker 支持 HPA 自动伸缩（3~50 副本），实现了零停机的滚动更新
-3. **可靠性**：通过 Redis + MySQL 双写 + inflight 追踪 + 指数退避重试，实现了 at-least-once 投递语义，任务不丢失
-4. **可观测性**：集成 Prometheus 指标 + Zap 结构化日志 + Grafana 看板，涵盖任务提交量、执行耗时、队列深度、Worker 活跃数等核心指标
-5. **云原生部署**：提供完整的 Kubernetes YAML 和 Helm Chart，支持一键部署，Worker 基于自定义指标自动伸缩
+Scheduler 的调度循环（延迟晋升、补偿扫描、健康检查）如果多实例同时运行会导致重复调度，用 etcd `concurrency.Election` 实现 Leader 选举：
+
+1. 3 个 Scheduler 副本同时 Campaign，仅一个当选 Leader
+2. Leader 持有 **15 秒 TTL 的 etcd Lease**（`concurrency.WithTTL(15)`），Session 自动续约
+3. 仅 Leader 运行 7 个后台调度循环（由 `OnStartedLeading` 回调触发）
+4. Leader 崩溃时 Lease 到期不续约，**15 秒内**另一个 Standby 自动接管
+5. Leader 正常退出时主动 Resign，切换时间更短
+
+K8s 部署 3 副本 + pod anti-affinity 分散到不同节点，防止单节点故障导致所有 Scheduler 不可用。
+
+> 【深挖：Leader 切换期间任务会丢失吗？】
+>
+> 不会。Leader 只负责"调度决策"（延迟晋升、补偿入队），不负责任务执行。任务在 Redis 队列中，Worker 的拉取完全不依赖 Scheduler。15 秒窗口内唯一影响是延迟任务晋升和补偿扫描暂停，但不会丢任务，已经在执行的任务不受影响。
 
 ---
 
-## 五、面试常见追问与回答要点
+### 3.7 CronJob 定时任务
+
+Scheduler 的 `cronLoop` 每秒检查一次到期的 CronJob：
+
+1. `FindDueCronJobs`：查询 MySQL 中 `enabled=true AND next_run_at <= now()` 的记录（每次最多 `cron_batch_size=100` 条）
+2. **ConcurrencyPolicy** 检查：
+   - `Allow`（默认）：允许并发执行，直接触发
+   - `Forbid`：检查是否有同类型任务正在运行（`HasRunningTasks`），有则跳过本次但仍推进 next_run_at
+3. 由 CronJob 模板生成新 Task，写 MySQL + 入队 Redis
+4. 通过 `cronutil.NextRunTime`（基于 robfig/cron 库）计算下次执行时间，更新 `last_run_at` 和 `next_run_at`
+
+Cron 表达式由 API Server 在创建时解析（`pkg/cronutil`），domain 层不依赖 cron 解析库，保持纯净。
+
+---
+
+### 3.8 DDD 分层架构
+
+采用领域驱动设计（DDD）分层，核心约束：**domain 层纯净，不引入 log/metrics 等基础设施依赖。**
+
+```
+interfaces/     -> HTTP/gRPC handler, 参数校验, 协议转换
+application/    -> 编排层, 组合领域服务, 管理后台循环
+domain/         -> 纯业务逻辑, 仅依赖标准库和 entity/repository 接口
+infrastructure/ -> 仓储实现, Leader 选举, 配置管理
+```
+
+基础设施关注点通过 **Hook 机制**注入 domain 层：
+- `BeforeSubmitHook`：限流、配额检查（infrastructure 实现，注入 TaskServiceImpl）
+- `AfterSubmitHook`：日志、metrics（同上）
+- Worker 中间件链（Recovery -> Logging -> Timeout）：洋葱模型，业务 Handler 只关注业务逻辑
+
+例如 `SchedulerService`（domain 层）只定义 `CompensateOrphanedTasks` 的业务规则，不关心定时器、日志、metrics。`SchedulerAppService`（application 层）负责用 ticker 驱动循环并记录日志。
+
+---
+
+### 3.9 gRPC + HTTP 双 API
+
+通过 Protobuf 定义 API（`api/proto/dispatch.proto`），`make proto` 生成 Go 代码。API Server 同时暴露 gRPC（:9090）和 HTTP REST（:8080）两种接口。支持任务 CRUD、CronJob CRUD、队列统计查询。
+
+---
+
+### 3.10 其他关键设计
+
+**任务状态机：** 8 个状态 Pending -> Scheduled -> Running -> Completed/Failed/Timeout/Retrying/Cancelled。MySQL Version 字段做乐观锁，防止并发状态更新冲突。
+
+**指数退避重试：** 失败任务按 `RetryBackoff` 进入延迟队列（delayed ZSET），Worker 空队列轮询也采用指数退避（100ms-2s）。
+
+**Worker 中间件链：** Recovery（捕获 panic）-> Logging（记录执行耗时）-> Timeout（超时控制）。可插拔洋葱模型。
+
+**优雅停机：** Worker 收到 SIGTERM 停止拉取新任务，等待 in-flight 任务完成（ShutdownTimeout=30s）。K8s `terminationGracePeriodSeconds=60s` 留足余量。
+
+**任务清理：** `cleanupLoop` 每小时运行一次，删除 7 天前的终态任务（Completed/Failed/Cancelled/Timeout），防止 MySQL 表无限增长。
+
+**Worker 执行前终态检查：** 取到任务后先查 MySQL 最新状态，如果已被取消/完成则跳过执行，直接 Ack。防止用户已取消但任务仍被执行。
+
+---
+
+## 四、Result -- 成果
+
+1. **性能**：队列入队/出队 10 万+ QPS，P99 < 1ms
+2. **高可用**：Scheduler Leader 故障切换 < 15s，Worker HPA 3-50 副本自动伸缩，滚动更新零停机
+3. **可靠性**：MySQL-Redis 双写 + inflight 追踪 + 补偿循环 + 乐观锁，实现 at-least-once 语义
+4. **可观测性**：Prometheus metrics + Zap 结构化 JSON 日志，覆盖任务提交量/执行耗时/队列深度/Worker 活跃数
+5. **云原生部署**：Kubernetes YAML + Helm Chart，HPA 基于 CPU + 自定义指标（active tasks）自动伸缩
+
+---
+
+## 五、常见追问
 
 ### Q1：Redis 宕机了怎么办？任务会丢吗？
 
-不会。每个任务提交时会**同时写入 MySQL 和 Redis**——MySQL 做持久化，Redis 做队列。Redis 挂了，任务数据在 MySQL 中完好，Redis 恢复后可以从 MySQL 重建队列。另外 Redis 本身也有 AOF 持久化机制做兜底。
+不会丢。每个任务提交时先写 MySQL（持久化），再写 Redis（队列）。Redis 挂了，任务数据在 MySQL 中完好。Scheduler 的 compensateLoop 每 30 秒扫描一次 MySQL 中 Pending 状态的孤儿任务，Redis 恢复后自动补偿入队。最坏情况下任务延迟 30 秒被执行，但不会丢失。
 
 ### Q2：如何保证任务不被重复消费？
 
 三层保障：
-1. **Lua 原子出队**：ZPOPMIN 是原子弹出操作，弹出后立即从 ZSET 中删除，不会有两个 Worker 拿到同一个任务
-2. **inflight Hash 追踪**：出队后立即放入 inflight，Ack 后才删除
-3. **MySQL 乐观锁**：状态更新时检查 Version 字段，并发更新只有一个能成功
+1. **Lua 原子出队**：ZPOPMIN 弹出后立即从 ZSET 删除，不存在两个 Worker 取到同一任务
+2. **inflight Hash**：出队后放入 inflight，Ack 后删除。补偿循环通过 `EnqueueIfNotInflight` 避免重复入队
+3. **MySQL 乐观锁**：状态更新检查 Version 字段，并发更新只有一个成功
 
-### Q3：延迟任务是怎么实现的？
+### Q3：延迟任务怎么实现？
 
-用另一个 Redis ZSET，score 是执行时间戳（毫秒）。Scheduler 每秒扫描一次，通过 Lua 脚本把 `score <= 当前时间` 的任务批量（每次最多 100 个）原子地从 delayed ZSET 移动到 ready ZSET。这样延迟任务到期后就会被 Worker 正常取走执行。
+独立的 Redis ZSET（delayed），`score = 执行时间戳（毫秒）`。Scheduler 的 `promoteDelayedLoop` 每秒扫描一次，Lua 脚本把 `score <= 当前时间` 的任务批量（每次最多 100 个）原子地从 delayed ZSET 移动到 ready ZSET，移动时 score 变为 `-priority`。到期后 Worker 正常取走执行。
 
-### Q4：Scheduler 和 Worker 之间是怎么通信的？
+### Q4：任务取消怎么实现？
 
-它们之间**没有直接通信**。Scheduler 把任务放进 Redis 队列，Worker 从 Redis 队列取任务——Redis 是它们之间的解耦层。Worker 通过 etcd 注册自己的信息（IP、状态、负载），Scheduler 通过 Watch etcd 感知 Worker 的上下线。这种设计让两者完全解耦，Worker 可以独立伸缩。
+API Server 直接修改 MySQL 中任务状态为 Cancelled。Worker 在执行前会查 MySQL 最新状态（`processTask` 中的终态检查），发现已取消则跳过执行直接 Ack。如果任务正在执行中，当前版本不强制中断（需要 Handler 自行检查 context），但状态更新因乐观锁保证不会覆盖。
 
-### Q5：如果让你重新设计，会有什么改进？
+### Q5：Scheduler 和 Worker 之间怎么通信？
 
-1. **补充认证授权**：当前版本假设部署在可信的 K8s 集群内，没有做 API 层的认证鉴权，生产环境需要加上 mTLS 和 RBAC
-2. **任务编排**：当前只支持独立任务，可以扩展支持 DAG 工作流（任务 A 完成后才触发任务 B）
-3. **多租户隔离**：数据层已经有 Namespace 字段，但缺少配额管理和资源隔离
-4. **可观测性增强**：可以加入 OpenTelemetry 分布式链路追踪，串联任务从提交到完成的全链路
+**零直接通信。** 三个中间件做解耦：
+- **Redis**：Scheduler 入队，Worker 出队
+- **etcd**：Worker 注册自身信息，Scheduler Watch 拓扑变更
+- **MySQL**：任务状态的 source of truth
 
-### Q6：为什么不直接用 Asynq / Temporal 这些现成方案？
+### Q6：如果让你重新设计，会有什么改进？
 
-Asynq 确实和 DispatchHub 的思路类似，都是基于 Redis 的任务队列。但 Asynq 缺少控制面/数据面分离的架构、缺少 etcd 级别的 Leader 选举、没有 MySQL-Redis 双写补偿机制。Temporal 更侧重工作流编排，对于简单的任务调度场景太重了。自研的好处是完全贴合业务需求，也让团队对核心调度逻辑有完整的掌控力。
+1. **认证授权**：当前假设可信 K8s 集群内部署，缺少 mTLS 和 RBAC
+2. **DAG 工作流**：当前仅支持独立任务和 CronJob，可扩展支持任务依赖编排
+3. **多租户隔离**：数据层已有 Namespace 字段，但缺少配额管理
+4. **OpenTelemetry**：加入分布式链路追踪，串联任务全生命周期
+5. **Redis Cluster**：当前单实例 Redis，生产环境应部署集群模式
+
+### Q7：为什么不直接用 Asynq / Temporal？
+
+Asynq 和 DispatchHub 思路类似（Redis 后端），但 Asynq 缺少控制面/数据面分离架构、缺少 etcd Leader 选举、没有 MySQL-Redis 双写补偿机制。Temporal 侧重工作流编排，简单任务调度场景过重。自研的优势是完全贴合需求，团队对核心调度逻辑有完整掌控力。
 
 ---
 
-## 六、一句话总结（收尾用）
+## 六、一句话总结
 
-> DispatchHub 是一个基于 Go 语言的云原生分布式任务调度系统，核心创新点是用 Redis Sorted Set + Lua 脚本实现了支持优先级排序的高性能队列，配合 etcd Leader 选举实现 Scheduler 高可用，Worker 拉模型+协程池实现背压控制，最终在 10 万+ QPS 的并发场景下保证了任务的可靠调度和执行。
+DispatchHub 是基于 Go 的云原生分布式任务调度系统，用 Redis Sorted Set + Lua 脚本实现支持优先级排序的高性能队列，etcd Leader 选举实现 Scheduler 高可用，Worker 拉模型 + channel 信号量实现背压控制，MySQL-Redis 双写 + 补偿循环保证任务可靠投递，采用 DDD 分层架构保持 domain 层纯净，Kubernetes + HPA 实现弹性伸缩。

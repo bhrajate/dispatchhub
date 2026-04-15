@@ -11,6 +11,7 @@ import (
 	apiservergrpc "github.com/dispatchhub/dispatchhub/internal/apiserver/interfaces/grpc"
 	apiserverhttp "github.com/dispatchhub/dispatchhub/internal/apiserver/interfaces/http"
 	"github.com/dispatchhub/dispatchhub/internal/shared/domain/entity"
+	"github.com/dispatchhub/dispatchhub/internal/shared/infrastructure/persistence"
 	"github.com/dispatchhub/dispatchhub/internal/shared/infrastructure/config"
 	mysqlstore "github.com/dispatchhub/dispatchhub/internal/shared/infrastructure/persistence/mysql"
 	redisstore "github.com/dispatchhub/dispatchhub/internal/shared/infrastructure/persistence/redis"
@@ -19,15 +20,8 @@ import (
 	"github.com/dispatchhub/dispatchhub/pkg/metrics"
 	"github.com/dispatchhub/dispatchhub/pkg/ratelimit"
 	"github.com/dispatchhub/dispatchhub/pkg/signals"
-
-	goredis "github.com/redis/go-redis/v9"
-	"gorm.io/driver/mysql"
-	"gorm.io/gorm"
 )
 
-// apiserver is a stateless API gateway that can be horizontally scaled.
-// It does not participate in leader election — it simply exposes the
-// HTTP/gRPC API and delegates to the shared TaskService + repositories.
 func main() {
 	var (
 		configFile  string
@@ -60,38 +54,18 @@ func main() {
 	log.Info(version.Info())
 	ctx := signals.SetupSignalContext()
 
-	// --- Infrastructure ---
-	var redisClient goredis.UniversalClient
-	if cfg.Redis.ClusterMode {
-		redisClient = goredis.NewClusterClient(&goredis.ClusterOptions{
-			Addrs:    cfg.Redis.ClusterAddrs,
-			Password: cfg.Redis.Password,
-			PoolSize: cfg.Redis.PoolSize,
-		})
-	} else {
-		redisClient = goredis.NewClient(&goredis.Options{
-			Addr:     cfg.Redis.Addr,
-			Password: cfg.Redis.Password,
-			DB:       cfg.Redis.DB,
-			PoolSize: cfg.Redis.PoolSize,
-		})
-	}
+	// --- Infrastructure (factory) ---
+	redisClient := persistence.NewRedisClient(cfg.Redis)
 	defer redisClient.Close()
 
-	db, err := gorm.Open(mysql.Open(cfg.MySQL.DSN), &gorm.Config{})
+	db, err := persistence.NewMySQLDB(cfg.MySQL)
 	if err != nil {
-		log.Fatalf("connect mysql: %v", err)
+		log.Fatalf("%v", err)
 	}
-	sqlDB, err := db.DB()
-	if err != nil {
-		log.Fatalf("get sql.DB: %v", err)
-	}
-	sqlDB.SetMaxOpenConns(cfg.MySQL.MaxOpenConns)
-	sqlDB.SetMaxIdleConns(cfg.MySQL.MaxIdleConns)
-	sqlDB.SetConnMaxLifetime(cfg.MySQL.ConnMaxLifetime)
+	sqlDB, _ := db.DB()
 	defer sqlDB.Close()
 
-	// --- Repositories (shared infrastructure) ---
+	// --- Repositories ---
 	broker := redisstore.NewQueueBroker(redisClient)
 	taskRepo, err := mysqlstore.NewTaskRepository(db)
 	if err != nil {
@@ -105,8 +79,7 @@ func main() {
 	// --- TaskService ---
 	taskSvc := apisvc.NewTaskServiceImpl(broker, taskRepo, cronRepo)
 
-	// Rate limiting (per-queue token bucket)
-	limiter := ratelimit.NewMultiQueueLimiter(1000, 1000) // default: 1000 req/s per queue
+	limiter := ratelimit.NewMultiQueueLimiter(1000, 1000)
 	taskSvc.SetBeforeSubmit(func(task *entity.Task) error {
 		if !limiter.Allow(task.QueueName) {
 			return fmt.Errorf("queue %s rate limit exceeded", task.QueueName)
@@ -114,7 +87,6 @@ func main() {
 		return nil
 	})
 
-	// Logging + metrics
 	taskSvc.SetAfterSubmit(func(task *entity.Task) {
 		metrics.TasksSubmitted.WithLabelValues(
 			task.QueueName, task.Type, fmt.Sprintf("%d", task.Priority),
@@ -123,7 +95,7 @@ func main() {
 			task.ID, task.Type, task.QueueName, task.Priority)
 	})
 
-	// --- Apiserver interfaces ---
+	// --- Interfaces ---
 	grpcServer := apiservergrpc.NewServer(taskSvc)
 	go func() {
 		if err := grpcServer.Serve(cfg.Server.GRPCAddr); err != nil {
@@ -131,7 +103,16 @@ func main() {
 		}
 	}()
 
-	httpServer := apiserverhttp.NewServer(taskSvc, cfg.Server.HTTPAddr)
+	httpServer := apiserverhttp.NewServer(taskSvc, cfg.Server.HTTPAddr, func(ctx context.Context) error {
+		if err := redisClient.Ping(ctx).Err(); err != nil {
+			return fmt.Errorf("redis: %w", err)
+		}
+		checkDB, _ := db.DB()
+		if err := checkDB.PingContext(ctx); err != nil {
+			return fmt.Errorf("mysql: %w", err)
+		}
+		return nil
+	})
 	go func() {
 		if err := httpServer.Serve(); err != nil {
 			log.Errorf("HTTP server: %v", err)
@@ -141,7 +122,6 @@ func main() {
 	<-ctx.Done()
 
 	log.Info("shutting down apiserver...")
-	// Use fresh context for graceful shutdown (original ctx is already cancelled)
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 	grpcServer.GracefulStop()

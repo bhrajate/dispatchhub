@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/dispatchhub/dispatchhub/internal/shared/domain/entity"
+	"github.com/dispatchhub/dispatchhub/internal/shared/infrastructure/persistence"
 	"github.com/dispatchhub/dispatchhub/internal/shared/infrastructure/config"
 	etcdstore "github.com/dispatchhub/dispatchhub/internal/shared/infrastructure/persistence/etcd"
 	mysqlstore "github.com/dispatchhub/dispatchhub/internal/shared/infrastructure/persistence/mysql"
@@ -20,11 +21,6 @@ import (
 	"github.com/dispatchhub/dispatchhub/pkg/log"
 	"github.com/dispatchhub/dispatchhub/pkg/signals"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
-
-	goredis "github.com/redis/go-redis/v9"
-	clientv3 "go.etcd.io/etcd/client/v3"
-	"gorm.io/driver/mysql"
-	"gorm.io/gorm"
 )
 
 func main() {
@@ -59,49 +55,24 @@ func main() {
 	log.Info(version.Info())
 	ctx := signals.SetupSignalContext()
 
-	// --- Infrastructure ---
-	etcdClient, err := clientv3.New(clientv3.Config{
-		Endpoints:   cfg.Etcd.Endpoints,
-		DialTimeout: cfg.Etcd.DialTimeout,
-	})
+	// --- Infrastructure (factory) ---
+	etcdClient, err := persistence.NewEtcdClient(cfg.Etcd)
 	if err != nil {
 		log.Fatalf("connect etcd: %v", err)
 	}
 	defer etcdClient.Close()
 
-	var redisClient goredis.UniversalClient
-	if cfg.Redis.ClusterMode {
-		redisClient = goredis.NewClusterClient(&goredis.ClusterOptions{
-			Addrs:        cfg.Redis.ClusterAddrs,
-			Password:     cfg.Redis.Password,
-			PoolSize:     cfg.Redis.PoolSize,
-			MinIdleConns: cfg.Redis.MinIdleConns,
-		})
-	} else {
-		redisClient = goredis.NewClient(&goredis.Options{
-			Addr:         cfg.Redis.Addr,
-			Password:     cfg.Redis.Password,
-			DB:           cfg.Redis.DB,
-			PoolSize:     cfg.Redis.PoolSize,
-			MinIdleConns: cfg.Redis.MinIdleConns,
-		})
-	}
+	redisClient := persistence.NewRedisClient(cfg.Redis)
 	defer redisClient.Close()
 
-	db, err := gorm.Open(mysql.Open(cfg.MySQL.DSN), &gorm.Config{})
+	db, err := persistence.NewMySQLDB(cfg.MySQL)
 	if err != nil {
-		log.Fatalf("connect mysql: %v", err)
+		log.Fatalf("%v", err)
 	}
-	sqlDB, err := db.DB()
-	if err != nil {
-		log.Fatalf("get sql.DB: %v", err)
-	}
-	sqlDB.SetMaxOpenConns(cfg.MySQL.MaxOpenConns)
-	sqlDB.SetMaxIdleConns(cfg.MySQL.MaxIdleConns)
-	sqlDB.SetConnMaxLifetime(cfg.MySQL.ConnMaxLifetime)
+	sqlDB, _ := db.DB()
 	defer sqlDB.Close()
 
-	// --- Repositories (shared infrastructure) ---
+	// --- Repositories ---
 	broker := redisstore.NewQueueBroker(redisClient)
 	registry := etcdstore.NewWorkerRegistry(etcdClient)
 	taskRepo, err := mysqlstore.NewTaskRepository(db)
@@ -122,14 +93,12 @@ func main() {
 		broker, registry, taskRepo,
 	)
 
-	// --- Worker middleware (interfaces layer) ---
 	w.Use(
 		middleware.Recovery(),
 		middleware.Logging(),
 		middleware.Timeout(cfg.Worker.TaskTimeout),
 	)
 
-	// Register example handlers
 	w.RegisterFunc("example.echo", func(ctx context.Context, task *entity.Task) *entity.TaskResult {
 		return &entity.TaskResult{Output: string(task.Payload)}
 	})
@@ -139,7 +108,7 @@ func main() {
 		return &entity.TaskResult{Error: ctx.Err()}
 	})
 
-	// --- Internal ops server (health + metrics only) ---
+	// --- Ops server (health + metrics) ---
 	opsMux := http.NewServeMux()
 	opsMux.Handle("GET /metrics", promhttp.Handler())
 	opsMux.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) {
@@ -151,10 +120,7 @@ func main() {
 		_ = json.NewEncoder(w).Encode(map[string]string{"status": "ready"})
 	})
 
-	opsServer := &http.Server{
-		Addr:    cfg.Server.HTTPAddr,
-		Handler: opsMux,
-	}
+	opsServer := &http.Server{Addr: cfg.Server.HTTPAddr, Handler: opsMux}
 	go func() {
 		log.Infof("worker ops server listening on %s", cfg.Server.HTTPAddr)
 		if err := opsServer.ListenAndServe(); err != nil && err != http.ErrServerClosed {

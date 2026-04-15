@@ -25,10 +25,13 @@ type TaskStore interface {
 	TaskWriter
 }
 
-// TaskCompensator provides queries and updates for the compensate loop.
+// TaskCompensator provides queries and updates for background maintenance loops.
 type TaskCompensator interface {
 	FindStaleByState(ctx context.Context, state entity.TaskState, olderThan time.Duration, limit int) ([]*entity.Task, error)
 	// TouchUpdatedAt refreshes updated_at WITHOUT incrementing version.
-	// This prevents version mismatch between Redis (task JSON) and MySQL.
 	TouchUpdatedAt(ctx context.Context, id string) error
+	// HasRunningTasks returns true if there are tasks in Running state with the given type and namespace.
+	HasRunningTasks(ctx context.Context, taskType, namespace string) (bool, error)
+	// DeleteTerminalOlderThan deletes completed/failed/cancelled/timeout tasks older than the threshold.
+	DeleteTerminalOlderThan(ctx context.Context, olderThan time.Duration, limit int) (int64, error)
 }

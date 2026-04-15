@@ -13,7 +13,7 @@ type QueueBroker interface {
 	Dequeue(ctx context.Context, queues []string) (*entity.Task, error)
 	Ack(ctx context.Context, queue string, taskID string) error
 	Nack(ctx context.Context, queue string, task *entity.Task) error
-	PromoteDelayed(ctx context.Context, queue string) (int64, error)
+	PromoteDelayed(ctx context.Context, queue string, batchSize int) (int64, error)
 	Len(ctx context.Context, queue string) (int64, error)
 	Stats(ctx context.Context, queue string) (*entity.QueueStats, error)
 	// EnqueueIfNotInflight atomically checks if the task ID is in the inflight set;

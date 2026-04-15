@@ -26,7 +26,7 @@ type WorkerEvent struct {
 type WorkerRegistry interface {
 	Register(ctx context.Context, worker *entity.WorkerInfo) error
 	Deregister(ctx context.Context, workerID string) error
-	Heartbeat(ctx context.Context, heartbeat *entity.Heartbeat) error
+	Heartbeat(ctx context.Context, worker *entity.WorkerInfo) error
 	GetWorker(ctx context.Context, workerID string) (*entity.WorkerInfo, error)
 	ListWorkers(ctx context.Context) ([]*entity.WorkerInfo, error)
 	WatchWorkers(ctx context.Context) (<-chan WorkerEvent, error)

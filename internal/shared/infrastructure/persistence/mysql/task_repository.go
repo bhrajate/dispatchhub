@@ -8,7 +8,6 @@ import (
 	"github.com/dispatchhub/dispatchhub/internal/shared/domain/entity"
 	"github.com/dispatchhub/dispatchhub/internal/shared/domain/repository"
 	"gorm.io/gorm"
-	"gorm.io/gorm/clause"
 )
 
 // TaskRepository implements repository.TaskRepository using MySQL via GORM.
@@ -47,7 +46,6 @@ func (s *TaskRepository) Update(ctx context.Context, task *entity.Task) error {
 	result := s.db.WithContext(ctx).
 		Model(task).
 		Where("id = ? AND version = ?", task.ID, oldVersion).
-		Clauses(clause.Locking{Strength: "UPDATE"}).
 		Updates(task)
 
 	if result.Error != nil {
@@ -119,6 +117,26 @@ func (s *TaskRepository) TouchUpdatedAt(ctx context.Context, id string) error {
 		Model(&entity.Task{}).
 		Where("id = ?", id).
 		Update("updated_at", time.Now()).Error
+}
+
+func (s *TaskRepository) DeleteTerminalOlderThan(ctx context.Context, olderThan time.Duration, limit int) (int64, error) {
+	threshold := time.Now().Add(-olderThan)
+	result := s.db.WithContext(ctx).
+		Where("state IN ? AND finished_at < ?",
+			[]entity.TaskState{entity.TaskStateCompleted, entity.TaskStateFailed, entity.TaskStateCancelled, entity.TaskStateTimeout},
+			threshold).
+		Limit(limit).
+		Delete(&entity.Task{})
+	return result.RowsAffected, result.Error
+}
+
+func (s *TaskRepository) HasRunningTasks(ctx context.Context, taskType, namespace string) (bool, error) {
+	var count int64
+	err := s.db.WithContext(ctx).
+		Model(&entity.Task{}).
+		Where("type = ? AND namespace = ? AND state = ?", taskType, namespace, entity.TaskStateRunning).
+		Count(&count).Error
+	return count > 0, err
 }
 
 // Verify MySQL TaskRepository satisfies all repository interfaces.
