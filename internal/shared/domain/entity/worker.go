@@ -44,12 +44,3 @@ type WorkerInfo struct {
 	Version        string            `json:"version"`
 }
 
-// Heartbeat carries periodic worker status to the scheduler.
-type Heartbeat struct {
-	WorkerID    string      `json:"worker_id"`
-	State       WorkerState `json:"state"`
-	ActiveTasks int         `json:"active_tasks"`
-	CPUUsage    float64     `json:"cpu_usage"`
-	MemUsage    float64     `json:"mem_usage"`
-	Timestamp   time.Time   `json:"timestamp"`
-}

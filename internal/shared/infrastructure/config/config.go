@@ -2,6 +2,7 @@ package config
 
 import (
 	"os"
+	"strings"
 	"time"
 
 	"gopkg.in/yaml.v3"
@@ -132,6 +133,7 @@ func DefaultConfig() *Config {
 }
 
 // LoadFromFile reads config from a YAML file and merges with defaults.
+// After YAML parsing, environment variables override specific fields.
 func LoadFromFile(path string) (*Config, error) {
 	cfg := DefaultConfig()
 	data, err := os.ReadFile(path)
@@ -141,5 +143,32 @@ func LoadFromFile(path string) (*Config, error) {
 	if err := yaml.Unmarshal(data, cfg); err != nil {
 		return nil, err
 	}
+	applyEnvOverrides(cfg)
 	return cfg, nil
+}
+
+// applyEnvOverrides overrides config fields from environment variables.
+// This enables sensitive values (passwords, DSNs) to be injected via K8s Secrets.
+func applyEnvOverrides(cfg *Config) {
+	if v := os.Getenv("DISPATCH_GRPC_ADDR"); v != "" {
+		cfg.Server.GRPCAddr = v
+	}
+	if v := os.Getenv("DISPATCH_HTTP_ADDR"); v != "" {
+		cfg.Server.HTTPAddr = v
+	}
+	if v := os.Getenv("DISPATCH_REDIS_ADDR"); v != "" {
+		cfg.Redis.Addr = v
+	}
+	if v := os.Getenv("DISPATCH_REDIS_PASSWORD"); v != "" {
+		cfg.Redis.Password = v
+	}
+	if v := os.Getenv("DISPATCH_MYSQL_DSN"); v != "" {
+		cfg.MySQL.DSN = v
+	}
+	if v := os.Getenv("DISPATCH_ETCD_ENDPOINTS"); v != "" {
+		cfg.Etcd.Endpoints = strings.Split(v, ",")
+	}
+	if v := os.Getenv("DISPATCH_LOG_LEVEL"); v != "" {
+		cfg.Log.Level = v
+	}
 }

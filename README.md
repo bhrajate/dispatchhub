@@ -1,166 +1,167 @@
 # DispatchHub
 
-云原生分布式任务调度系统，专为高并发、高可用、高性能场景设计。
+云原生分布式任务调度系统。控制面/数据面分离架构，基于 Redis Sorted Set + Lua 原子脚本实现优先级队列，etcd Leader 选举保证 Scheduler 高可用，Worker 拉模型 + 协程池信号量实现背压控制。
 
-## 系统简介
-
-DispatchHub 是一个生产级别的分布式任务调度平台，参考了 Kubernetes Scheduler、Temporal、Asynq 等知名开源项目的设计理念，采用控制面/数据面分离架构，具备以下核心能力：
-
-- **高并发**：基于 Redis Sorted Set 的优先级队列 + Lua 原子脚本，Worker 协程池背压控制
-- **高可用**：etcd Leader 选举实现 Scheduler 多副本热备，Worker 心跳检测与自动摘除
-- **高性能**：gRPC 长连接通信，延迟任务定时晋升，批量状态转换
-
-## 架构总览
+## 架构
 
 ```
-                         ┌──────────────────────┐
-                         │    Client / CLI       │
-                         └──────────┬───────────┘
-                                    │ HTTP/gRPC
-                         ┌──────────▼───────────┐
-                         │     API Server        │  ← 无状态网关, 可水平扩展
-                         │  (REST + gRPC + Metrics)│
-                         └──────────┬───────────┘
-                                    │
-              ┌─────────────────────┼─────────────────────┐
-              │                     │                     │
-     ┌────────▼─────────┐ ┌────────▼─────────┐ ┌────────▼─────────┐
-     │  Scheduler (Leader)│ │ Scheduler (Standby)│ │ Scheduler (Standby)│
-     │  - 任务分发        │ │  - 等待选举        │ │  - 等待选举        │
-     │  - 延迟晋升        │ └──────────────────┘ └──────────────────┘
-     │  - 健康检查        │
-     └────────┬─────────┘
-              │  etcd Leader Election
-    ┌─────────┼──────────────┐
-    │   Redis Queue Broker   │  ← 优先级队列 + 延迟队列
-    └─────────┬──────────────┘
-              │  Dequeue (背压)
-   ┌──────────┼──────────┼──────────┐
-   │          │          │          │
-┌──▼──┐  ┌───▼──┐  ┌───▼──┐  ┌───▼──┐
-│Worker│  │Worker│  │Worker│  │Worker│  ← HPA 自动伸缩
-└──────┘  └──────┘  └──────┘  └──────┘
-    │         │         │         │
-    └─────────┴────┬────┴─────────┘
-                   │  Heartbeat
-              ┌────▼─────┐    ┌────────┐
-              │   etcd   │    │  MySQL  │  ← 持久化存储
-              │ (注册中心) │    │ (任务状态) │
-              └──────────┘    └────────┘
+                       ┌─────────────────┐
+                       │  Client / CLI   │
+                       └────────┬────────┘
+                                │ HTTP / gRPC
+                       ┌────────▼────────┐
+                       │   API Server    │  无状态网关, Ingress 接入
+                       │ :8080  :9090    │  HTTP + gRPC + Metrics(:9091)
+                       └────────┬────────┘
+                                │
+          ┌─────────────────────┼─────────────────────┐
+          │                     │                     │
+ ┌────────▼─────────┐ ┌────────▼─────────┐ ┌────────▼─────────┐
+ │ Scheduler(Leader) │ │ Scheduler(Standby)│ │ Scheduler(Standby)│
+ │ 延迟晋升/补偿/cron │ │ 等待选举          │ │ 等待选举          │
+ │ 仅暴露 :8080 运维  │ └──────────────────┘ └──────────────────┘
+ └────────┬─────────┘
+          │  etcd Leader Election (15s TTL)
+ ┌────────┴──────────────┐
+ │  Redis Queue Broker   │  Sorted Set 优先级队列 + 延迟队列
+ └────────┬──────────────┘
+          │  Pull (背压)
+  ┌───────┼───────┼───────┐
+  │       │       │       │
+┌─▼──┐ ┌─▼──┐ ┌─▼──┐ ┌─▼──┐
+│ W1 │ │ W2 │ │ W3 │ │ WN │  HPA 3-50 副本
+└─┬──┘ └─┬──┘ └─┬──┘ └─┬──┘
+  │      │      │      │
+  └──────┴──┬───┴──────┘
+            │ Heartbeat
+     ┌──────▼──────┐   ┌────────┐
+     │    etcd     │   │ MySQL  │
+     │  注册 & 选举  │   │ 持久化  │
+     └─────────────┘   └────────┘
 ```
 
-## 核心组件
+**组件职责**
 
-| 组件 | 角色 | 说明 |
-|------|------|------|
-| **Scheduler** | 控制面 | Leader 选举保证单活，负责任务入队、延迟晋升、Worker 健康检查 |
-| **Worker** | 数据面 | 从队列拉取任务执行，协程池限流，心跳上报，优雅停机 |
-| **API Server** | 接入层 | 无状态 HTTP/gRPC 网关，可独立水平扩展 |
-| **Redis** | 快速队列 | Sorted Set 优先级队列，Lua 原子出队，延迟任务暂存 |
-| **etcd** | 协调层 | Leader 选举、Worker 服务注册与发现、Watch 拓扑变更 |
-| **MySQL** | 持久层 | 任务状态持久化、乐观锁并发控制、事件审计 |
+| 组件 | 角色 | K8s 部署 | 端口 |
+|------|------|----------|------|
+| API Server | 唯一外部入口，无状态 HTTP/gRPC 网关 | 2+ replicas, Ingress | :8080 HTTP, :9090 gRPC, :9091 metrics |
+| Scheduler | Leader 选举单活，运行后台调度循环 | 3 replicas, pod anti-affinity | :8080 (healthz/readyz/metrics) |
+| Worker | 拉模型执行引擎，完全无状态 | 5 replicas + HPA(3-50) | :8080 ops, :9091 metrics |
+| Redis | Sorted Set 优先级队列 + Lua 原子脚本 | - | - |
+| etcd | Leader 选举 + Worker 服务注册发现 | - | - |
+| MySQL | 任务状态持久化 + 乐观锁并发控制 | - | - |
 
 ## 项目结构
 
 ```
 dispatchhub/
-├── cmd/
-│   ├── apiserver/              # API 网关入口
-│   ├── scheduler/              # 调度器入口
-│   └── worker/                 # 工作节点入口
+├── cmd/{apiserver,scheduler,worker}/   # 三个进程入口
 ├── internal/
-│   ├── shared/                 # 跨服务共享
+│   ├── shared/                         # 跨服务共享
 │   │   ├── domain/
-│   │   │   ├── entity/         # 实体 & 值对象 (Task, Worker, Queue)
-│   │   │   ├── repository/     # 仓储接口 (TaskRepository, QueueBroker, WorkerRegistry)
-│   │   │   └── service/        # 服务接口 (TaskService)
+│   │   │   ├── entity/                 # Task, Worker, CronJob, Queue
+│   │   │   ├── repository/             # 仓储接口 (QueueBroker, TaskStore, WorkerRegistry)
+│   │   │   └── service/                # 领域服务接口
 │   │   └── infrastructure/
-│   │       ├── config/         # 配置管理
-│   │       ├── version/        # 版本信息
+│   │       ├── config/                 # 配置管理
+│   │       ├── version/                # 版本信息 (ldflags 注入)
 │   │       └── persistence/
-│   │           ├── mysql/      # MySQL 持久化实现
-│   │           ├── redis/      # Redis 队列实现
-│   │           └── etcd/       # etcd 注册中心实现
-│   ├── apiserver/              # API Server 服务
-│   │   └── interfaces/
-│   │       ├── grpc/           # gRPC 接口
-│   │       └── http/           # REST API + 健康检查
-│   ├── scheduler/              # Scheduler 服务
-│   │   ├── domain/service/     # 调度领域服务 (核心算法)
-│   │   ├── application/        # 应用编排 (reconciliation loops)
-│   │   ├── infrastructure/
-│   │   │   └── election/       # etcd Leader 选举
-│   │   └── interfaces/
-│   │       ├── grpc/           # gRPC 接口
-│   │       └── http/           # REST API
-│   └── worker/                 # Worker 服务
-│       ├── application/service/# Worker 执行引擎
-│       └── interfaces/
-│           └── middleware/     # 中间件 (日志/恢复/超时)
-├── pkg/                        # 通用工具包
-│   ├── log/                    # 结构化日志
-│   ├── metrics/                # Prometheus 指标
-│   ├── ratelimit/              # 令牌桶限流器
-│   ├── retry/                  # 指数退避重试
-│   └── signals/                # 信号处理
-├── api/proto/                  # Protobuf 定义
-├── deploy/
-│   ├── kubernetes/             # K8s 原生 YAML
-│   └── helm/                   # Helm Chart
-├── config.yaml                 # 示例配置
-├── Dockerfile                  # 多阶段构建
-└── Makefile                    # 构建自动化
+│   │           ├── mysql/              # TaskStore 实现
+│   │           ├── redis/              # QueueBroker 实现 (Lua 脚本)
+│   │           └── etcd/               # WorkerRegistry 实现
+│   ├── apiserver/                      # API Server
+│   │   ├── domain/service/             # TaskServiceImpl + Hooks
+│   │   └── interfaces/{grpc,http}/     # gRPC + REST 接口
+│   ├── scheduler/                      # Scheduler
+│   │   ├── domain/service/             # SchedulerService (纯领域逻辑)
+│   │   ├── application/                # 应用层编排 (reconciliation loops)
+│   │   └── infrastructure/election/    # etcd Leader 选举
+│   └── worker/                         # Worker
+│       ├── application/service/        # 执行引擎 + 背压控制
+│       └── interfaces/middleware/      # Recovery / Logging / Timeout
+├── pkg/{log,metrics,ratelimit,retry,signals,cronutil}/
+├── api/proto/                          # Protobuf 定义
+├── deploy/{kubernetes,helm}/           # K8s YAML + Helm Chart
+├── config.yaml                         # 示例配置
+├── Dockerfile                          # 多阶段构建
+└── Makefile                            # 构建自动化
 ```
 
-## 快速开始
+## 构建与部署
 
-### 前置依赖
-
-- Go 1.22+
-- Redis 7.0+
-- etcd 3.5+
-- MySQL 8.0+
-
-### 本地构建
+**前置依赖:** Go 1.25+, Redis 7.0+, etcd 3.5+, MySQL 8.0+
 
 ```bash
-# 编译所有组件
+# 编译 -- 产出 bin/apiserver, bin/scheduler, bin/worker
 make build
 
-# 运行调度器
+# 运行测试
+make test          # 全量 (含 -race)
+make test-unit     # 仅单元测试 (-short)
+make lint          # golangci-lint
+
+# 生成 protobuf 代码
+make proto
+
+# Docker 多阶段构建 (golang:1.25-alpine, CGO_ENABLED=0, ldflags 注入版本)
+make docker        # 构建全部镜像
+make push          # 推送全部镜像
+
+# 本地运行 (需本地 Redis/etcd/MySQL)
 make run-scheduler
-
-# 运行 Worker
 make run-worker
-
-# 运行 API Server
 make run-apiserver
+
+# Kubernetes 部署
+make helm-install                      # Helm
+kubectl apply -f deploy/kubernetes/    # 或原生 YAML
 ```
 
-### Docker 构建
+**Docker 构建细节:** `FROM golang:1.25-alpine` 多阶段构建，`CGO_ENABLED=0`，通过 `--build-arg` 传入 VERSION/GIT_COMMIT/BUILD_DATE，`-ldflags` 注入 `version` 包。运行时镜像 `alpine:3.19`，非 root 用户运行。
 
-```bash
-# 构建所有镜像
-make docker
+## 配置
 
-# 推送镜像
-make push
+配置文件 `config.yaml`，支持环境变量覆盖 (`DISPATCH_MYSQL_DSN`, `DISPATCH_REDIS_PASSWORD` 等)。
+
+```yaml
+server:
+  grpc_addr: ":9090"
+  http_addr: ":8080"
+
+scheduler:
+  lease_duration: 15s           # etcd Lease TTL
+  cron_check_interval: 1s       # CronJob 扫描间隔
+  cron_batch_size: 100          # 每次最多触发的 CronJob 数
+
+worker:
+  queues: [default, high-priority]
+  concurrency: 100              # 协程池信号量容量
+  heartbeat_interval: 5s
+  shutdown_timeout: 30s         # 优雅停机等待时间
+  task_timeout: 5m
+
+redis:
+  addr: localhost:6379
+  pool_size: 100
+
+mysql:
+  dsn: "root:@tcp(localhost:3306)/dispatchhub?charset=utf8mb4&parseTime=true&loc=Local"
+  max_open_conns: 50
+
+etcd:
+  endpoints: [localhost:2379]
+  dial_timeout: 5s
+
+metrics:
+  enabled: true
+  addr: ":9091"
+  path: "/metrics"
 ```
 
-### Kubernetes 部署
+## API 示例
 
 ```bash
-# 使用 Helm
-make helm-install
-
-# 或直接使用 kubectl
-kubectl apply -f deploy/kubernetes/
-```
-
-### 提交任务示例
-
-```bash
-# 通过 HTTP API 提交任务
+# 提交即时任务
 curl -X POST http://localhost:8080/api/v1/tasks \
   -H "Content-Type: application/json" \
   -d '{
@@ -176,38 +177,37 @@ curl -X POST http://localhost:8080/api/v1/tasks \
 # 查询任务状态
 curl http://localhost:8080/api/v1/tasks/{task_id}
 
-# 查看队列统计
+# 队列统计
 curl http://localhost:8080/api/v1/queues/default/stats
 ```
 
-## 文档目录
+## 技术栈
+
+| 类别 | 选型 |
+|------|------|
+| 语言 | Go 1.25 |
+| 接口 | gRPC + HTTP/REST, proto codegen |
+| 队列 | Redis Sorted Set + Lua 原子脚本 |
+| 协调 | etcd (concurrency.Election + Watch) |
+| 持久化 | MySQL + GORM |
+| 监控 | Prometheus + Grafana |
+| 日志 | Zap 结构化 JSON |
+| 容器化 | Docker 多阶段构建, K8s + Helm + HPA |
+
+## 文档
 
 | 文档 | 内容 |
 |------|------|
-| [架构设计](docs/architecture.md) | 整体架构、三高设计方案、设计决策 |
-| [核心组件](docs/components.md) | Scheduler、Worker、存储层详细说明 |
-| [数据模型](docs/data-models.md) | Task/Worker/Queue 数据结构、状态机 |
-| [存储层设计](docs/storage.md) | 表结构、Redis/etcd/MySQL 选型、容量规划、归档策略 |
-| [队列选型分析](docs/queue-selection.md) | 6 种 MQ 方案逐一对照分析、决策推导过程 |
-| [为什么不用 MySQL 做队列](docs/why-not-mysql-queue.md) | FOR UPDATE 锁机制、并发出队问题、性能天花板分析 |
-| [API 参考](docs/api-reference.md) | REST API 和 gRPC 接口完整文档 |
-| [队列设计](docs/queue-design.md) | 优先级队列、延迟队列、Lua 脚本详解 |
-| [部署指南](docs/deployment.md) | Kubernetes 部署、Helm Chart、运维手册 |
-| [配置参考](docs/configuration.md) | 全部配置项说明与默认值 |
-
-## 技术栈
-
-| 类别 | 技术选型 |
-|------|----------|
-| 语言 | Go 1.22 |
-| RPC | gRPC + HTTP/REST |
-| 队列 | Redis Sorted Set + Lua |
-| 协调 | etcd (Leader Election + Service Discovery) |
-| 持久化 | MySQL + GORM |
-| 监控 | Prometheus + Grafana |
-| 日志 | Zap (结构化 JSON) |
-| 容器化 | Docker 多阶段构建 |
-| 编排 | Kubernetes + Helm + HPA |
+| [架构设计](docs/architecture.md) | 整体架构与设计决策 |
+| [核心组件](docs/components.md) | Scheduler / Worker / 存储层 |
+| [数据模型](docs/data-models.md) | Task / Worker / CronJob 数据结构与状态机 |
+| [存储层设计](docs/storage.md) | MySQL / Redis / etcd 选型与容量规划 |
+| [队列选型分析](docs/queue-selection.md) | 6 种 MQ 方案对比与决策推导 |
+| [队列设计](docs/queue-design.md) | 优先级队列 / 延迟队列 / Lua 脚本详解 |
+| [API 参考](docs/api-reference.md) | REST + gRPC 接口文档 |
+| [部署指南](docs/deployment.md) | K8s 部署 / Helm Chart / 运维手册 |
+| [配置参考](docs/configuration.md) | 全部配置项说明 |
+| [面试指南](docs/interview.md) | 项目介绍与常见追问 |
 
 ## License
 

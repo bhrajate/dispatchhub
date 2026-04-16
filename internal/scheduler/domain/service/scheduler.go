@@ -83,6 +83,21 @@ func (s *SchedulerService) TriggerDueCronJobs(ctx context.Context, limit int) (i
 			continue
 		}
 
+		// Concurrency policy: skip if Forbid and previous execution still running
+		if job.ConcurrencyPolicy == entity.ConcurrencyForbid {
+			running, err := s.taskMaint.HasRunningTasks(ctx, job.Type, job.Namespace)
+			if err != nil {
+				lastErr = fmt.Errorf("cron job %s: check running tasks: %w", job.ID, err)
+				continue
+			}
+			if running {
+				// Skip this trigger but still advance next_run_at
+				job.NextRunAt = &nextTime
+				_ = s.cronMaint.UpdateCronJob(ctx, job)
+				continue
+			}
+		}
+
 		task := job.ToTask()
 		task.ID = uuid.New().String()
 		task.State = entity.TaskStatePending
@@ -139,6 +154,11 @@ func (s *SchedulerService) CompensateOrphanedTasks(ctx context.Context, olderTha
 	return compensated, nil
 }
 
+// CleanupTerminalTasks deletes completed/failed/cancelled/timeout tasks older than the threshold.
+func (s *SchedulerService) CleanupTerminalTasks(ctx context.Context, olderThan time.Duration, limit int) (int64, error) {
+	return s.taskMaint.DeleteTerminalOlderThan(ctx, olderThan, limit)
+}
+
 // SyncWorkers refreshes the worker list from the registry.
 func (s *SchedulerService) SyncWorkers(ctx context.Context) (int, error) {
 	workers, err := s.registry.ListWorkers(ctx)
@@ -150,10 +170,23 @@ func (s *SchedulerService) SyncWorkers(ctx context.Context) (int, error) {
 	defer s.mu.Unlock()
 
 	s.workers = make(map[string]*entity.WorkerInfo, len(workers))
+	queueSet := make(map[string]struct{})
 	for _, w := range workers {
 		if w.State == entity.WorkerStateOnline {
 			s.workers[w.ID] = w
+			for _, q := range w.Queues {
+				queueSet[q] = struct{}{}
+			}
 		}
+	}
+
+	// Dynamically discover queues from registered workers
+	s.queues = make([]string, 0, len(queueSet))
+	for q := range queueSet {
+		s.queues = append(s.queues, q)
+	}
+	if len(s.queues) == 0 {
+		s.queues = []string{entity.DefaultQueueName}
 	}
 
 	return len(s.workers), nil

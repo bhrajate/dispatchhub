@@ -7,6 +7,7 @@ import (
 
 	"github.com/dispatchhub/dispatchhub/internal/shared/domain/entity"
 	"github.com/dispatchhub/dispatchhub/internal/shared/domain/repository"
+	"github.com/dispatchhub/dispatchhub/pkg/log"
 	"github.com/google/uuid"
 )
 
@@ -80,14 +81,14 @@ func (s *TaskServiceImpl) SubmitTask(ctx context.Context, task *entity.Task) err
 		return fmt.Errorf("persist task: %w", err)
 	}
 
+	// Enqueue to Redis. If this fails, the task is still persisted in MySQL
+	// and the scheduler's compensate loop will re-enqueue it within 30 seconds.
+	// We intentionally do NOT return error here to avoid client retries
+	// that would create duplicate tasks.
 	if task.ScheduleAt != nil || task.Delay.Duration > 0 {
-		if err := s.broker.EnqueueDelayed(ctx, task.QueueName, task); err != nil {
-			return fmt.Errorf("enqueue delayed: %w", err)
-		}
+		_ = s.broker.EnqueueDelayed(ctx, task.QueueName, task)
 	} else {
-		if err := s.broker.Enqueue(ctx, task.QueueName, task); err != nil {
-			return fmt.Errorf("enqueue: %w", err)
-		}
+		_ = s.broker.Enqueue(ctx, task.QueueName, task)
 	}
 
 	// Post-submit hook (logging, metrics)
@@ -113,7 +114,21 @@ func (s *TaskServiceImpl) CancelTask(ctx context.Context, taskID string) error {
 	task.State = entity.TaskStateCancelled
 	now := time.Now()
 	task.FinishedAt = &now
-	return s.taskStore.Update(ctx, task)
+	if err := s.taskStore.Update(ctx, task); err != nil {
+		return err
+	}
+
+	// Best-effort: remove from Redis queue to prevent workers from picking it up.
+	if err := s.broker.Remove(ctx, task.QueueName, taskID); err != nil {
+		log.Errorf("remove cancelled task %s from queue: %v", taskID, err)
+	}
+
+	// Best-effort: signal running workers to cancel this task's context.
+	if err := s.broker.PublishCancel(ctx, taskID); err != nil {
+		log.Errorf("publish cancel signal for task %s: %v", taskID, err)
+	}
+
+	return nil
 }
 
 func (s *TaskServiceImpl) GetTask(ctx context.Context, taskID string) (*entity.Task, error) {

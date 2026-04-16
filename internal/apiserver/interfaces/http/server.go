@@ -15,19 +15,25 @@ import (
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 )
 
+// HealthChecker is called by the readyz endpoint to verify dependencies.
+// Returns nil if healthy, or an error describing the unhealthy component.
+type HealthChecker func(ctx context.Context) error
+
 // Server provides the REST API and metrics endpoint.
 type Server struct {
-	taskSvc apisvc.TaskService
-	mux     *http.ServeMux
-	server  *http.Server
+	taskSvc      apisvc.TaskService
+	healthCheck  HealthChecker
+	mux          *http.ServeMux
+	server       *http.Server
 }
 
 // NewServer creates a new HTTP server with REST API routes.
-func NewServer(taskSvc apisvc.TaskService, addr string) *Server {
+func NewServer(taskSvc apisvc.TaskService, addr string, healthCheck HealthChecker) *Server {
 	mux := http.NewServeMux()
 	s := &Server{
-		taskSvc: taskSvc,
-		mux:     mux,
+		taskSvc:     taskSvc,
+		healthCheck: healthCheck,
+		mux:         mux,
 		server: &http.Server{
 			Addr:         addr,
 			Handler:      mux,
@@ -114,7 +120,8 @@ func (s *Server) handleSubmitTask(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := s.taskSvc.SubmitTask(r.Context(), task); err != nil {
-		writeError(w, http.StatusInternalServerError, "submit task: %v", err)
+		log.Errorf("submit task: %v", err)
+		writeError(w, http.StatusInternalServerError, "failed to submit task")
 		return
 	}
 
@@ -128,7 +135,8 @@ func (s *Server) handleGetTask(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 	task, err := s.taskSvc.GetTask(r.Context(), id)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "get task: %v", err)
+		log.Errorf("get task: %v", err)
+		writeError(w, http.StatusInternalServerError, "failed to get task")
 		return
 	}
 	if task == nil {
@@ -160,7 +168,8 @@ func (s *Server) handleListTasks(w http.ResponseWriter, r *http.Request) {
 
 	tasks, total, err := s.taskSvc.ListTasks(r.Context(), filter)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "list tasks: %v", err)
+		log.Errorf("list tasks: %v", err)
+		writeError(w, http.StatusInternalServerError, "failed to list tasks")
 		return
 	}
 
@@ -173,7 +182,8 @@ func (s *Server) handleListTasks(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleCancelTask(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 	if err := s.taskSvc.CancelTask(r.Context(), id); err != nil {
-		writeError(w, http.StatusInternalServerError, "cancel task: %v", err)
+		log.Errorf("cancel task: %v", err)
+		writeError(w, http.StatusInternalServerError, "failed to cancel task")
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]string{"status": "cancelled"})
@@ -183,7 +193,8 @@ func (s *Server) handleQueueStats(w http.ResponseWriter, r *http.Request) {
 	name := r.PathValue("name")
 	stats, err := s.taskSvc.QueueStats(r.Context(), name)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "queue stats: %v", err)
+		log.Errorf("queue stats: %v", err)
+		writeError(w, http.StatusInternalServerError, "failed to get queue stats")
 		return
 	}
 	writeJSON(w, http.StatusOK, stats)
@@ -247,7 +258,8 @@ func (s *Server) handleCreateCronJob(w http.ResponseWriter, r *http.Request) {
 	job.NextRunAt = &next
 
 	if err := s.taskSvc.CreateCronJob(r.Context(), job); err != nil {
-		writeError(w, http.StatusInternalServerError, "create cron job: %v", err)
+		log.Errorf("create cron job: %v", err)
+		writeError(w, http.StatusInternalServerError, "failed to create cron job")
 		return
 	}
 
@@ -258,7 +270,8 @@ func (s *Server) handleGetCronJob(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 	job, err := s.taskSvc.GetCronJob(r.Context(), id)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "get cron job: %v", err)
+		log.Errorf("get cron job: %v", err)
+		writeError(w, http.StatusInternalServerError, "failed to get cron job")
 		return
 	}
 	if job == nil {
@@ -285,7 +298,8 @@ func (s *Server) handleListCronJobs(w http.ResponseWriter, r *http.Request) {
 
 	jobs, total, err := s.taskSvc.ListCronJobs(r.Context(), namespace, limit, offset)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "list cron jobs: %v", err)
+		log.Errorf("list cron jobs: %v", err)
+		writeError(w, http.StatusInternalServerError, "failed to list cron jobs")
 		return
 	}
 
@@ -298,7 +312,8 @@ func (s *Server) handleListCronJobs(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleDeleteCronJob(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 	if err := s.taskSvc.DeleteCronJob(r.Context(), id); err != nil {
-		writeError(w, http.StatusInternalServerError, "delete cron job: %v", err)
+		log.Errorf("delete cron job: %v", err)
+		writeError(w, http.StatusInternalServerError, "failed to delete cron job")
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]string{"status": "deleted"})
@@ -308,7 +323,15 @@ func (s *Server) handleHealthz(w http.ResponseWriter, _ *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 }
 
-func (s *Server) handleReadyz(w http.ResponseWriter, _ *http.Request) {
+func (s *Server) handleReadyz(w http.ResponseWriter, r *http.Request) {
+	if s.healthCheck != nil {
+		ctx, cancel := context.WithTimeout(r.Context(), 3*time.Second)
+		defer cancel()
+		if err := s.healthCheck(ctx); err != nil {
+			writeJSON(w, http.StatusServiceUnavailable, map[string]string{"status": "not ready", "error": err.Error()})
+			return
+		}
+	}
 	writeJSON(w, http.StatusOK, map[string]string{"status": "ready"})
 }
 

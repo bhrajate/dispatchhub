@@ -5,6 +5,16 @@ import (
 	"time"
 )
 
+// ConcurrencyPolicy controls how cron job triggers overlapping executions.
+type ConcurrencyPolicy string
+
+const (
+	// ConcurrencyAllow allows concurrent executions (default).
+	ConcurrencyAllow ConcurrencyPolicy = "Allow"
+	// ConcurrencyForbid skips a trigger if the previous execution is still running.
+	ConcurrencyForbid ConcurrencyPolicy = "Forbid"
+)
+
 // CronJob defines a recurring task that is triggered on a cron schedule.
 // Each trigger creates a new Task instance with the configured spec.
 type CronJob struct {
@@ -20,7 +30,8 @@ type CronJob struct {
 	Timeout      Duration        `json:"timeout"`
 	MaxRetries   int             `json:"max_retries"`
 	RetryBackoff Duration        `json:"retry_backoff"`
-	Enabled      bool            `json:"enabled" gorm:"default:true"`
+	ConcurrencyPolicy ConcurrencyPolicy `json:"concurrency_policy" gorm:"size:32;default:'Allow'"`
+	Enabled           bool              `json:"enabled" gorm:"default:true"`
 	LastRunAt    *time.Time      `json:"last_run_at,omitempty"`
 	NextRunAt    *time.Time      `json:"next_run_at,omitempty"`
 	CreatedAt    time.Time       `json:"created_at" gorm:"autoCreateTime"`

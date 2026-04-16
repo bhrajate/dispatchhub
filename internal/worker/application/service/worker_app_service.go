@@ -11,6 +11,7 @@ import (
 
 	"github.com/dispatchhub/dispatchhub/internal/shared/domain/entity"
 	"github.com/dispatchhub/dispatchhub/internal/shared/domain/repository"
+	"github.com/dispatchhub/dispatchhub/internal/shared/infrastructure/version"
 	"github.com/dispatchhub/dispatchhub/pkg/log"
 	"github.com/dispatchhub/dispatchhub/pkg/metrics"
 	"github.com/google/uuid"
@@ -47,13 +48,16 @@ type WorkerConfig struct {
 // executes handlers, and reports heartbeats.
 type WorkerAppService struct {
 	cfg        WorkerConfig
-	broker     repository.QueueBroker
-	registry   repository.WorkerRegistry
-	taskWriter repository.TaskWriter
+	broker    repository.QueueBroker
+	registry  repository.WorkerRegistry
+	taskStore repository.TaskStore
 
 	mu       sync.RWMutex
 	handlers map[string]Handler
 	mw       []Middleware
+
+	cancelsMu sync.RWMutex
+	cancels   map[string]context.CancelFunc
 
 	info   *entity.WorkerInfo
 	active int64
@@ -66,7 +70,7 @@ func NewWorkerAppService(
 	cfg WorkerConfig,
 	broker repository.QueueBroker,
 	registry repository.WorkerRegistry,
-	taskWriter repository.TaskWriter,
+	taskStore repository.TaskStore,
 ) *WorkerAppService {
 	if cfg.ID == "" {
 		hostname, _ := os.Hostname()
@@ -80,8 +84,9 @@ func NewWorkerAppService(
 		cfg:        cfg,
 		broker:     broker,
 		registry:   registry,
-		taskWriter: taskWriter,
+		taskStore: taskStore,
 		handlers:   make(map[string]Handler),
+		cancels:    make(map[string]context.CancelFunc),
 		sem:        make(chan struct{}, cfg.Concurrency),
 	}
 }
@@ -115,7 +120,7 @@ func (w *WorkerAppService) Run(ctx context.Context) error {
 		State:         entity.WorkerStateOnline,
 		StartedAt:     now,
 		LastHeartbeat: now,
-		Version:       "v0.1.0",
+		Version:       version.Version,
 	}
 
 	if err := w.registry.Register(ctx, w.info); err != nil {
@@ -130,6 +135,15 @@ func (w *WorkerAppService) Run(ctx context.Context) error {
 		w.cfg.ID, w.cfg.Queues, w.cfg.Concurrency)
 
 	go w.heartbeatLoop(ctx)
+
+	cancelCh, cancelCleanup, err := w.broker.SubscribeCancel(ctx)
+	if err != nil {
+		log.Errorf("failed to subscribe to cancel channel: %v", err)
+	} else {
+		defer cancelCleanup()
+		go w.cancelListenLoop(ctx, cancelCh)
+	}
+
 	w.fetchLoop(ctx)
 
 	log.Info("waiting for in-flight tasks to complete...")
@@ -150,6 +164,10 @@ func (w *WorkerAppService) Run(ctx context.Context) error {
 }
 
 func (w *WorkerAppService) fetchLoop(ctx context.Context) {
+	const minBackoff = 100 * time.Millisecond
+	const maxBackoff = 2 * time.Second
+	backoff := minBackoff
+
 	for {
 		select {
 		case <-ctx.Done():
@@ -173,10 +191,17 @@ func (w *WorkerAppService) fetchLoop(ctx context.Context) {
 			select {
 			case <-ctx.Done():
 				return
-			case <-time.After(100 * time.Millisecond):
+			case <-time.After(backoff):
+			}
+			// Exponential backoff on empty queue
+			if backoff < maxBackoff {
+				backoff *= 2
 			}
 			continue
 		}
+
+		// Got a task — reset backoff
+		backoff = minBackoff
 
 		w.wg.Add(1)
 		go func() {
@@ -199,6 +224,28 @@ func (w *WorkerAppService) processTask(ctx context.Context, task *entity.Task) {
 	logger := log.With("task_id", task.ID, "type", task.Type, "queue", task.QueueName)
 	logger.Infof("processing task (active=%d/%d)", active, w.cfg.Concurrency)
 
+	// Check latest state from MySQL — skip if already cancelled/completed
+	if latest, err := w.taskStore.Get(ctx, task.ID); err == nil && latest != nil && latest.IsTerminal() {
+		logger.Infof("task already in terminal state %s, skipping", latest.State)
+		_ = w.broker.Ack(ctx, task.QueueName, task.ID)
+		return
+	}
+
+	// Create a cancellable context for this task so it can be
+	// terminated via cancel signal from the API server.
+	taskCtx, taskCancel := context.WithCancel(ctx)
+	defer taskCancel()
+	defer w.untrackCancel(task.ID)
+	w.trackCancel(task.ID, taskCancel)
+
+	// Re-check state after registering cancel to close the race window
+	// where the cancel signal arrives before trackCancel is called.
+	if latest, err := w.taskStore.Get(ctx, task.ID); err == nil && latest != nil && latest.IsTerminal() {
+		logger.Infof("task cancelled during setup, skipping")
+		_ = w.broker.Ack(ctx, task.QueueName, task.ID)
+		return
+	}
+
 	start := time.Now()
 
 	w.mu.RLock()
@@ -219,16 +266,27 @@ func (w *WorkerAppService) processTask(ctx context.Context, task *entity.Task) {
 	task.WorkerID = w.cfg.ID
 	now := time.Now()
 	task.StartedAt = &now
-	if err := w.taskWriter.Update(ctx, task); err != nil {
+	if err := w.taskStore.Update(ctx, task); err != nil {
 		logger.Errorf("update task state to running: %v", err)
 	}
 
 	// Timeout is handled by the Timeout middleware in the middleware chain.
 	// Do NOT add another context.WithTimeout here to avoid double-timeout.
-	result := w.safeHandle(ctx, handler, task)
+	// Use taskCtx so that cancel signals propagate to the handler.
+	result := w.safeHandle(taskCtx, handler, task)
 
 	duration := time.Since(start)
 	metrics.TaskDuration.WithLabelValues(task.QueueName, task.Type).Observe(duration.Seconds())
+
+	// Check if this was an explicit cancellation (not timeout)
+	if result.Error != nil && taskCtx.Err() == context.Canceled {
+		if latest, err := w.taskStore.Get(ctx, task.ID); err == nil && latest != nil && latest.State == entity.TaskStateCancelled {
+			logger.Infof("task cancelled after %v", duration)
+			_ = w.broker.Ack(ctx, task.QueueName, task.ID)
+			metrics.TasksProcessed.WithLabelValues(task.QueueName, task.Type, "cancelled").Inc()
+			return
+		}
+	}
 
 	if result.Error != nil {
 		logger.Errorf("task failed after %v: %v", duration, result.Error)
@@ -257,7 +315,7 @@ func (w *WorkerAppService) handleSuccess(ctx context.Context, task *entity.Task,
 	task.Result = result.Output
 	now := time.Now()
 	task.FinishedAt = &now
-	if err := w.taskWriter.Update(ctx, task); err != nil {
+	if err := w.taskStore.Update(ctx, task); err != nil {
 		log.Errorf("task %s: update completed state: %v", task.ID, err)
 	}
 	if err := w.broker.Ack(ctx, task.QueueName, task.ID); err != nil {
@@ -271,7 +329,7 @@ func (w *WorkerAppService) handleFailure(ctx context.Context, task *entity.Task,
 
 	if task.CanRetry() {
 		task.State = entity.TaskStateRetrying
-		if err := w.taskWriter.Update(ctx, task); err != nil {
+		if err := w.taskStore.Update(ctx, task); err != nil {
 			log.Errorf("task %s: update retrying state: %v (skip nack to avoid wrong retry count in queue)", task.ID, err)
 			return
 		}
@@ -283,7 +341,7 @@ func (w *WorkerAppService) handleFailure(ctx context.Context, task *entity.Task,
 		task.State = entity.TaskStateFailed
 		now := time.Now()
 		task.FinishedAt = &now
-		if err := w.taskWriter.Update(ctx, task); err != nil {
+		if err := w.taskStore.Update(ctx, task); err != nil {
 			log.Errorf("task %s: update failed state: %v", task.ID, err)
 		}
 		if err := w.broker.Ack(ctx, task.QueueName, task.ID); err != nil {
@@ -303,18 +361,53 @@ func (w *WorkerAppService) heartbeatLoop(ctx context.Context) {
 			return
 		case <-ticker.C:
 			cpuPct, memPct := systemStats()
-			hb := &entity.Heartbeat{
-				WorkerID:    w.cfg.ID,
-				State:       entity.WorkerStateOnline,
-				ActiveTasks: int(atomic.LoadInt64(&w.active)),
-				CPUUsage:    cpuPct,
-				MemUsage:    memPct,
-				Timestamp:   time.Now(),
-			}
-			if err := w.registry.Heartbeat(ctx, hb); err != nil {
+			w.info.State = entity.WorkerStateOnline
+			w.info.ActiveTasks = int(atomic.LoadInt64(&w.active))
+			w.info.CPUUsage = cpuPct
+			w.info.MemUsage = memPct
+			w.info.LastHeartbeat = time.Now()
+			if err := w.registry.Heartbeat(ctx, w.info); err != nil {
 				log.Errorf("heartbeat failed: %v", err)
 			}
 			metrics.WorkerHeartbeats.WithLabelValues(w.cfg.ID).Inc()
+		}
+	}
+}
+
+func (w *WorkerAppService) trackCancel(taskID string, cancel context.CancelFunc) {
+	w.cancelsMu.Lock()
+	w.cancels[taskID] = cancel
+	w.cancelsMu.Unlock()
+}
+
+func (w *WorkerAppService) untrackCancel(taskID string) {
+	w.cancelsMu.Lock()
+	delete(w.cancels, taskID)
+	w.cancelsMu.Unlock()
+}
+
+func (w *WorkerAppService) cancelRunningTask(taskID string) bool {
+	w.cancelsMu.RLock()
+	cancel, ok := w.cancels[taskID]
+	w.cancelsMu.RUnlock()
+	if ok {
+		cancel()
+	}
+	return ok
+}
+
+func (w *WorkerAppService) cancelListenLoop(ctx context.Context, ch <-chan string) {
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case taskID, ok := <-ch:
+			if !ok {
+				return
+			}
+			if w.cancelRunningTask(taskID) {
+				log.Infof("received cancel signal for task %s, context cancelled", taskID)
+			}
 		}
 	}
 }
