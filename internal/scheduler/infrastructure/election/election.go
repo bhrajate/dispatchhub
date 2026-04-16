@@ -12,12 +12,10 @@ import (
 
 // LeaderElector performs leader election using etcd.
 type LeaderElector struct {
-	client   *clientv3.Client
-	session  *concurrency.Session
-	election *concurrency.Election
-	prefix   string
-	id       string
-	ttl      int
+	client *clientv3.Client
+	prefix string
+	id     string
+	ttl    int
 
 	mu       sync.RWMutex
 	isLeader bool
@@ -80,11 +78,21 @@ func (le *LeaderElector) campaign(ctx context.Context) error {
 	}
 	defer session.Close()
 
-	le.session = session
 	election := concurrency.NewElection(session, le.prefix)
-	le.election = election
 
-	go le.observe(ctx)
+	// Use a scoped context so the observe goroutine is guaranteed to
+	// exit before this function returns, preventing goroutine leaks
+	// and data races across campaign retries.
+	observeCtx, observeCancel := context.WithCancel(ctx)
+	defer observeCancel()
+
+	var observeWg sync.WaitGroup
+	observeWg.Add(1)
+	go func() {
+		defer observeWg.Done()
+		le.observe(observeCtx, election)
+	}()
+	defer observeWg.Wait()
 
 	log.Infof("campaigning for leader: %s", le.id)
 	if err := election.Campaign(ctx, le.id); err != nil {
@@ -129,8 +137,8 @@ func (le *LeaderElector) campaign(ctx context.Context) error {
 	return nil
 }
 
-func (le *LeaderElector) observe(ctx context.Context) {
-	ch := le.election.Observe(ctx)
+func (le *LeaderElector) observe(ctx context.Context, election *concurrency.Election) {
+	ch := election.Observe(ctx)
 	for {
 		select {
 		case <-ctx.Done():
