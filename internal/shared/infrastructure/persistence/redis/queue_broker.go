@@ -281,4 +281,78 @@ func (q *QueueBroker) EnqueueIfNotInflight(ctx context.Context, queue string, ta
 	return result == 1, nil
 }
 
+const cancelChannel = keyPrefix + "task:cancel"
+
+// removeScript atomically removes a task from all queue stages.
+// KEYS[1] = ready key, KEYS[2] = delayed key, KEYS[3] = inflight key
+// ARGV[1] = task ID to match in JSON members
+var removeScript = redis.NewScript(`
+local removed = 0
+-- Remove from inflight hash (taskID -> JSON)
+if redis.call('HDEL', KEYS[3], ARGV[1]) == 1 then
+    removed = removed + 1
+end
+-- Remove from ready sorted set (scan for matching task ID in JSON member)
+local cursor = "0"
+repeat
+    local result = redis.call('ZSCAN', KEYS[1], cursor, 'MATCH', '*"id":"' .. ARGV[1] .. '"*', 'COUNT', 100)
+    cursor = result[1]
+    local members = result[2]
+    for i = 1, #members, 2 do
+        redis.call('ZREM', KEYS[1], members[i])
+        removed = removed + 1
+    end
+until cursor == "0"
+-- Remove from delayed sorted set
+cursor = "0"
+repeat
+    local result = redis.call('ZSCAN', KEYS[2], cursor, 'MATCH', '*"id":"' .. ARGV[1] .. '"*', 'COUNT', 100)
+    cursor = result[1]
+    local members = result[2]
+    for i = 1, #members, 2 do
+        redis.call('ZREM', KEYS[2], members[i])
+        removed = removed + 1
+    end
+until cursor == "0"
+return removed
+`)
+
+func (q *QueueBroker) Remove(ctx context.Context, queue string, taskID string) error {
+	_, err := removeScript.Run(ctx, q.client,
+		[]string{readyKeyFor(queue), delayedKeyFor(queue), inflightKeyFor(queue)},
+		taskID,
+	).Int64()
+	if err != nil && err != redis.Nil {
+		return fmt.Errorf("remove task %s from queue %s: %w", taskID, queue, err)
+	}
+	return nil
+}
+
+func (q *QueueBroker) PublishCancel(ctx context.Context, taskID string) error {
+	return q.client.Publish(ctx, cancelChannel, taskID).Err()
+}
+
+func (q *QueueBroker) SubscribeCancel(ctx context.Context) (<-chan string, func(), error) {
+	pubsub := q.client.Subscribe(ctx, cancelChannel)
+	if _, err := pubsub.Receive(ctx); err != nil {
+		_ = pubsub.Close()
+		return nil, nil, fmt.Errorf("subscribe cancel channel: %w", err)
+	}
+
+	ch := make(chan string, 64)
+	go func() {
+		defer close(ch)
+		for msg := range pubsub.Channel() {
+			select {
+			case ch <- msg.Payload:
+			case <-ctx.Done():
+				return
+			}
+		}
+	}()
+
+	cleanup := func() { _ = pubsub.Close() }
+	return ch, cleanup, nil
+}
+
 var _ repository.QueueBroker = (*QueueBroker)(nil)

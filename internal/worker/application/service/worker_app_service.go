@@ -56,6 +56,9 @@ type WorkerAppService struct {
 	handlers map[string]Handler
 	mw       []Middleware
 
+	cancelsMu sync.RWMutex
+	cancels   map[string]context.CancelFunc
+
 	info   *entity.WorkerInfo
 	active int64
 	sem    chan struct{}
@@ -83,6 +86,7 @@ func NewWorkerAppService(
 		registry:   registry,
 		taskStore: taskStore,
 		handlers:   make(map[string]Handler),
+		cancels:    make(map[string]context.CancelFunc),
 		sem:        make(chan struct{}, cfg.Concurrency),
 	}
 }
@@ -131,6 +135,15 @@ func (w *WorkerAppService) Run(ctx context.Context) error {
 		w.cfg.ID, w.cfg.Queues, w.cfg.Concurrency)
 
 	go w.heartbeatLoop(ctx)
+
+	cancelCh, cancelCleanup, err := w.broker.SubscribeCancel(ctx)
+	if err != nil {
+		log.Errorf("failed to subscribe to cancel channel: %v", err)
+	} else {
+		defer cancelCleanup()
+		go w.cancelListenLoop(ctx, cancelCh)
+	}
+
 	w.fetchLoop(ctx)
 
 	log.Info("waiting for in-flight tasks to complete...")
@@ -218,6 +231,21 @@ func (w *WorkerAppService) processTask(ctx context.Context, task *entity.Task) {
 		return
 	}
 
+	// Create a cancellable context for this task so it can be
+	// terminated via cancel signal from the API server.
+	taskCtx, taskCancel := context.WithCancel(ctx)
+	defer taskCancel()
+	defer w.untrackCancel(task.ID)
+	w.trackCancel(task.ID, taskCancel)
+
+	// Re-check state after registering cancel to close the race window
+	// where the cancel signal arrives before trackCancel is called.
+	if latest, err := w.taskStore.Get(ctx, task.ID); err == nil && latest != nil && latest.IsTerminal() {
+		logger.Infof("task cancelled during setup, skipping")
+		_ = w.broker.Ack(ctx, task.QueueName, task.ID)
+		return
+	}
+
 	start := time.Now()
 
 	w.mu.RLock()
@@ -244,10 +272,21 @@ func (w *WorkerAppService) processTask(ctx context.Context, task *entity.Task) {
 
 	// Timeout is handled by the Timeout middleware in the middleware chain.
 	// Do NOT add another context.WithTimeout here to avoid double-timeout.
-	result := w.safeHandle(ctx, handler, task)
+	// Use taskCtx so that cancel signals propagate to the handler.
+	result := w.safeHandle(taskCtx, handler, task)
 
 	duration := time.Since(start)
 	metrics.TaskDuration.WithLabelValues(task.QueueName, task.Type).Observe(duration.Seconds())
+
+	// Check if this was an explicit cancellation (not timeout)
+	if result.Error != nil && taskCtx.Err() == context.Canceled {
+		if latest, err := w.taskStore.Get(ctx, task.ID); err == nil && latest != nil && latest.State == entity.TaskStateCancelled {
+			logger.Infof("task cancelled after %v", duration)
+			_ = w.broker.Ack(ctx, task.QueueName, task.ID)
+			metrics.TasksProcessed.WithLabelValues(task.QueueName, task.Type, "cancelled").Inc()
+			return
+		}
+	}
 
 	if result.Error != nil {
 		logger.Errorf("task failed after %v: %v", duration, result.Error)
@@ -331,6 +370,44 @@ func (w *WorkerAppService) heartbeatLoop(ctx context.Context) {
 				log.Errorf("heartbeat failed: %v", err)
 			}
 			metrics.WorkerHeartbeats.WithLabelValues(w.cfg.ID).Inc()
+		}
+	}
+}
+
+func (w *WorkerAppService) trackCancel(taskID string, cancel context.CancelFunc) {
+	w.cancelsMu.Lock()
+	w.cancels[taskID] = cancel
+	w.cancelsMu.Unlock()
+}
+
+func (w *WorkerAppService) untrackCancel(taskID string) {
+	w.cancelsMu.Lock()
+	delete(w.cancels, taskID)
+	w.cancelsMu.Unlock()
+}
+
+func (w *WorkerAppService) cancelRunningTask(taskID string) bool {
+	w.cancelsMu.RLock()
+	cancel, ok := w.cancels[taskID]
+	w.cancelsMu.RUnlock()
+	if ok {
+		cancel()
+	}
+	return ok
+}
+
+func (w *WorkerAppService) cancelListenLoop(ctx context.Context, ch <-chan string) {
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case taskID, ok := <-ch:
+			if !ok {
+				return
+			}
+			if w.cancelRunningTask(taskID) {
+				log.Infof("received cancel signal for task %s, context cancelled", taskID)
+			}
 		}
 	}
 }
