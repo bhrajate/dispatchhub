@@ -33,6 +33,7 @@ type WorkerInfo struct {
 	State          WorkerState       `json:"state"`
 	Labels         map[string]string `json:"labels,omitempty"`
 	Queues         []string          `json:"queues"`
+	TaskTypes      []string          `json:"task_types,omitempty"`
 	Concurrency    int               `json:"concurrency"`
 	ActiveTasks    int               `json:"active_tasks"`
 	CompletedTotal int64             `json:"completed_total"`

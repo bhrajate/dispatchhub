@@ -13,6 +13,7 @@ import (
 	"github.com/dispatchhub/dispatchhub/internal/shared/domain/entity"
 	"github.com/dispatchhub/dispatchhub/internal/shared/infrastructure/persistence"
 	"github.com/dispatchhub/dispatchhub/internal/shared/infrastructure/config"
+	etcdstore "github.com/dispatchhub/dispatchhub/internal/shared/infrastructure/persistence/etcd"
 	mysqlstore "github.com/dispatchhub/dispatchhub/internal/shared/infrastructure/persistence/mysql"
 	redisstore "github.com/dispatchhub/dispatchhub/internal/shared/infrastructure/persistence/redis"
 	"github.com/dispatchhub/dispatchhub/internal/shared/infrastructure/version"
@@ -55,6 +56,12 @@ func main() {
 	ctx := signals.SetupSignalContext()
 
 	// --- Infrastructure (factory) ---
+	etcdClient, err := persistence.NewEtcdClient(cfg.Etcd)
+	if err != nil {
+		log.Fatalf("connect etcd: %v", err)
+	}
+	defer etcdClient.Close()
+
 	redisClient := persistence.NewRedisClient(cfg.Redis)
 	defer redisClient.Close()
 
@@ -67,6 +74,7 @@ func main() {
 
 	// --- Repositories ---
 	broker := redisstore.NewQueueBroker(redisClient)
+	registry := etcdstore.NewWorkerRegistry(etcdClient)
 	taskRepo, err := mysqlstore.NewTaskRepository(db)
 	if err != nil {
 		log.Fatalf("init task repository: %v", err)
@@ -78,6 +86,7 @@ func main() {
 
 	// --- TaskService ---
 	taskSvc := apisvc.NewTaskServiceImpl(broker, taskRepo, cronRepo)
+	taskSvc.SetRouteValidator(apisvc.NewRouteValidator(registry, 10*time.Second))
 
 	limiter := ratelimit.NewMultiQueueLimiter(1000, 1000)
 	taskSvc.SetBeforeSubmit(func(task *entity.Task) error {

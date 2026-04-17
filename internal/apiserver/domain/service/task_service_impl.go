@@ -23,11 +23,12 @@ type AfterSubmitHook func(task *entity.Task)
 // Hooks allow infrastructure concerns (rate limiting, logging, metrics)
 // to be injected without polluting the domain layer.
 type TaskServiceImpl struct {
-	broker       repository.QueueBroker
-	taskStore    repository.TaskStore
-	cronStore    repository.CronJobStore
-	beforeSubmit BeforeSubmitHook
-	afterSubmit  AfterSubmitHook
+	broker         repository.QueueBroker
+	taskStore      repository.TaskStore
+	cronStore      repository.CronJobStore
+	routeValidator *RouteValidator
+	beforeSubmit   BeforeSubmitHook
+	afterSubmit    AfterSubmitHook
 }
 
 // NewTaskServiceImpl creates a new TaskServiceImpl.
@@ -42,6 +43,11 @@ func NewTaskServiceImpl(broker repository.QueueBroker, taskStore repository.Task
 // SetBeforeSubmit registers a hook called before task submission (e.g., rate limiting).
 func (s *TaskServiceImpl) SetBeforeSubmit(hook BeforeSubmitHook) {
 	s.beforeSubmit = hook
+}
+
+// SetRouteValidator sets an optional route validator that checks queue+type feasibility.
+func (s *TaskServiceImpl) SetRouteValidator(rv *RouteValidator) {
+	s.routeValidator = rv
 }
 
 // SetAfterSubmit registers a hook called after successful task submission (e.g., logging/metrics).
@@ -74,6 +80,12 @@ func (s *TaskServiceImpl) SubmitTask(ctx context.Context, task *entity.Task) err
 	if s.beforeSubmit != nil {
 		if err := s.beforeSubmit(task); err != nil {
 			return err
+		}
+	}
+
+	if s.routeValidator != nil {
+		if err := s.routeValidator.Validate(ctx, task.QueueName, task.Type); err != nil {
+			return fmt.Errorf("route validation: %w", err)
 		}
 	}
 
