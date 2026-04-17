@@ -70,13 +70,13 @@ helm-template:
 
 ## Run locally (requires Redis, etcd, MySQL)
 run-scheduler:
-	go run ./cmd/scheduler --config=config.yaml
+	go run ./cmd/scheduler --config=config/scheduler.yaml
 
 run-worker:
-	go run ./cmd/worker --config=config.yaml
+	go run ./cmd/worker --config=config/worker.yaml
 
 run-apiserver:
-	go run ./cmd/apiserver --config=config.yaml
+	go run ./cmd/apiserver --config=config/apiserver.yaml
 
 ## Tidy dependencies
 tidy:

@@ -2,20 +2,6 @@ server:
   grpc_addr: ":9090"
   http_addr: ":8080"
 
-scheduler:
-  lease_duration: 15s
-  cron_check_interval: 1s
-  cron_batch_size: 100
-
-worker:
-  queues:
-    - default
-    - high-priority
-  concurrency: 100
-  heartbeat_interval: 5s
-  shutdown_timeout: 30s
-  task_timeout: 5m
-
 etcd:
   endpoints:
     - localhost:2379

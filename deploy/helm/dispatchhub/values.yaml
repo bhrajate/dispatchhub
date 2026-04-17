@@ -22,7 +22,6 @@ scheduler:
   service:
     type: ClusterIP
     httpPort: 8080
-    grpcPort: 9090
   config:
     leaseDuration: 15s
     cronCheckInterval: 1s
@@ -87,6 +86,7 @@ etcd:
 redis:
   clusterMode: false
   addr: redis:6379
+  clusterAddrs: []
   password: ""
   poolSize: 100
 

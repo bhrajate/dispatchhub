@@ -11,11 +11,11 @@ import (
 
 	"github.com/dispatchhub/dispatchhub/internal/shared/domain/entity"
 	"github.com/dispatchhub/dispatchhub/internal/shared/infrastructure/persistence"
-	"github.com/dispatchhub/dispatchhub/internal/shared/infrastructure/config"
 	etcdstore "github.com/dispatchhub/dispatchhub/internal/shared/infrastructure/persistence/etcd"
 	mysqlstore "github.com/dispatchhub/dispatchhub/internal/shared/infrastructure/persistence/mysql"
 	redisstore "github.com/dispatchhub/dispatchhub/internal/shared/infrastructure/persistence/redis"
 	"github.com/dispatchhub/dispatchhub/internal/shared/infrastructure/version"
+	workercfg "github.com/dispatchhub/dispatchhub/internal/worker/infrastructure/config"
 	workerservice "github.com/dispatchhub/dispatchhub/internal/worker/application/service"
 	"github.com/dispatchhub/dispatchhub/internal/worker/interfaces/middleware"
 	"github.com/dispatchhub/dispatchhub/pkg/log"
@@ -37,16 +37,16 @@ func main() {
 		os.Exit(0)
 	}
 
-	var cfg *config.Config
+	var cfg *workercfg.Config
 	var err error
 	if configFile != "" {
-		cfg, err = config.LoadFromFile(configFile)
+		cfg, err = workercfg.Load(configFile)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "load config: %v\n", err)
 			os.Exit(1)
 		}
 	} else {
-		cfg = config.DefaultConfig()
+		cfg = workercfg.Default()
 	}
 
 	log.Init(cfg.Log.Level, cfg.Log.Format, cfg.Log.Output)

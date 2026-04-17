@@ -32,7 +32,7 @@ spec:
         - name: worker
           image: "{{ .Values.worker.image.repository }}:{{ .Values.worker.image.tag | default .Chart.AppVersion }}"
           imagePullPolicy: {{ .Values.global.image.pullPolicy }}
-          args: ["--config=/etc/dispatchhub/config.yaml"]
+          args: ["--config=/etc/dispatchhub/worker.yaml"]
           ports:
             - name: metrics
               containerPort: 9091
@@ -44,7 +44,7 @@ spec:
       volumes:
         - name: config
           configMap:
-            name: {{ include "dispatchhub.name" . }}-config
+            name: {{ include "dispatchhub.name" . }}-worker-config
 {{- if .Values.worker.autoscaling.enabled }}
 ---
 apiVersion: autoscaling/v2

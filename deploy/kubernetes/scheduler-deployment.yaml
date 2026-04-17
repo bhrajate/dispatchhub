@@ -30,7 +30,7 @@ spec:
           image: dispatchhub/scheduler:latest
           imagePullPolicy: IfNotPresent
           args:
-            - --config=/etc/dispatchhub/config.yaml
+            - --config=/etc/dispatchhub/scheduler.yaml
           ports:
             - name: http
               containerPort: 8080
@@ -75,7 +75,7 @@ spec:
       volumes:
         - name: config
           configMap:
-            name: dispatchhub-config
+            name: dispatchhub-scheduler-config
       affinity:
         podAntiAffinity:
           preferredDuringSchedulingIgnoredDuringExecution:

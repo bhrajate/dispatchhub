@@ -27,12 +27,10 @@ spec:
         - name: scheduler
           image: "{{ .Values.scheduler.image.repository }}:{{ .Values.scheduler.image.tag | default .Chart.AppVersion }}"
           imagePullPolicy: {{ .Values.global.image.pullPolicy }}
-          args: ["--config=/etc/dispatchhub/config.yaml"]
+          args: ["--config=/etc/dispatchhub/scheduler.yaml"]
           ports:
             - name: http
               containerPort: {{ .Values.scheduler.service.httpPort }}
-            - name: grpc
-              containerPort: {{ .Values.scheduler.service.grpcPort }}
             - name: metrics
               containerPort: 9091
           livenessProbe:
@@ -55,7 +53,7 @@ spec:
       volumes:
         - name: config
           configMap:
-            name: {{ include "dispatchhub.name" . }}-config
+            name: {{ include "dispatchhub.name" . }}-scheduler-config
       affinity:
         podAntiAffinity:
           preferredDuringSchedulingIgnoredDuringExecution:
@@ -79,9 +77,6 @@ spec:
     - name: http
       port: {{ .Values.scheduler.service.httpPort }}
       targetPort: http
-    - name: grpc
-      port: {{ .Values.scheduler.service.grpcPort }}
-      targetPort: grpc
   selector:
     {{- include "dispatchhub.selectorLabels" . | nindent 4 }}
     app.kubernetes.io/component: scheduler

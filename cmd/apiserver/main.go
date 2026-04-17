@@ -7,12 +7,12 @@ import (
 	"os"
 	"time"
 
+	apiservercfg "github.com/dispatchhub/dispatchhub/internal/apiserver/infrastructure/config"
 	apisvc "github.com/dispatchhub/dispatchhub/internal/apiserver/domain/service"
 	apiservergrpc "github.com/dispatchhub/dispatchhub/internal/apiserver/interfaces/grpc"
 	apiserverhttp "github.com/dispatchhub/dispatchhub/internal/apiserver/interfaces/http"
 	"github.com/dispatchhub/dispatchhub/internal/shared/domain/entity"
 	"github.com/dispatchhub/dispatchhub/internal/shared/infrastructure/persistence"
-	"github.com/dispatchhub/dispatchhub/internal/shared/infrastructure/config"
 	etcdstore "github.com/dispatchhub/dispatchhub/internal/shared/infrastructure/persistence/etcd"
 	mysqlstore "github.com/dispatchhub/dispatchhub/internal/shared/infrastructure/persistence/mysql"
 	redisstore "github.com/dispatchhub/dispatchhub/internal/shared/infrastructure/persistence/redis"
@@ -37,16 +37,16 @@ func main() {
 		os.Exit(0)
 	}
 
-	var cfg *config.Config
+	var cfg *apiservercfg.Config
 	var err error
 	if configFile != "" {
-		cfg, err = config.LoadFromFile(configFile)
+		cfg, err = apiservercfg.Load(configFile)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "load config: %v\n", err)
 			os.Exit(1)
 		}
 	} else {
-		cfg = config.DefaultConfig()
+		cfg = apiservercfg.Default()
 	}
 
 	log.Init(cfg.Log.Level, cfg.Log.Format, cfg.Log.Output)

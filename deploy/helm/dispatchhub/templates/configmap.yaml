@@ -1,0 +1,145 @@
+{{- if .Values.apiserver.enabled }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "dispatchhub.name" . }}-apiserver-config
+  labels:
+    {{- include "dispatchhub.labels" . | nindent 4 }}
+    app.kubernetes.io/component: apiserver
+data:
+  apiserver.yaml: |
+    server:
+      grpc_addr: ":9090"
+      http_addr: ":8080"
+
+    etcd:
+      endpoints:
+        {{- toYaml .Values.etcd.endpoints | nindent 8 }}
+      dial_timeout: 5s
+
+    redis:
+      {{- if .Values.redis.clusterMode }}
+      cluster_mode: true
+      cluster_addrs:
+        {{- toYaml .Values.redis.clusterAddrs | nindent 8 }}
+      {{- else }}
+      addr: {{ .Values.redis.addr }}
+      {{- end }}
+      password: {{ .Values.redis.password | quote }}
+      pool_size: {{ .Values.redis.poolSize }}
+
+    mysql:
+      dsn: {{ .Values.mysql.dsn | quote }}
+      max_open_conns: {{ .Values.mysql.maxOpenConns }}
+
+    metrics:
+      enabled: {{ .Values.metrics.enabled }}
+      addr: ":9091"
+      path: "/metrics"
+
+    log:
+      level: {{ .Values.log.level }}
+      format: {{ .Values.log.format }}
+      output: stdout
+{{- end }}
+---
+{{- if .Values.scheduler.enabled }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "dispatchhub.name" . }}-scheduler-config
+  labels:
+    {{- include "dispatchhub.labels" . | nindent 4 }}
+    app.kubernetes.io/component: scheduler
+data:
+  scheduler.yaml: |
+    server:
+      http_addr: ":8080"
+
+    scheduler:
+      lease_duration: {{ .Values.scheduler.config.leaseDuration }}
+      cron_check_interval: {{ .Values.scheduler.config.cronCheckInterval }}
+      cron_batch_size: {{ .Values.scheduler.config.cronBatchSize }}
+
+    etcd:
+      endpoints:
+        {{- toYaml .Values.etcd.endpoints | nindent 8 }}
+      dial_timeout: 5s
+
+    redis:
+      {{- if .Values.redis.clusterMode }}
+      cluster_mode: true
+      cluster_addrs:
+        {{- toYaml .Values.redis.clusterAddrs | nindent 8 }}
+      {{- else }}
+      addr: {{ .Values.redis.addr }}
+      {{- end }}
+      password: {{ .Values.redis.password | quote }}
+      pool_size: {{ .Values.redis.poolSize }}
+
+    mysql:
+      dsn: {{ .Values.mysql.dsn | quote }}
+      max_open_conns: {{ .Values.mysql.maxOpenConns }}
+
+    metrics:
+      enabled: {{ .Values.metrics.enabled }}
+      addr: ":9091"
+      path: "/metrics"
+
+    log:
+      level: {{ .Values.log.level }}
+      format: {{ .Values.log.format }}
+      output: stdout
+{{- end }}
+---
+{{- if .Values.worker.enabled }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "dispatchhub.name" . }}-worker-config
+  labels:
+    {{- include "dispatchhub.labels" . | nindent 4 }}
+    app.kubernetes.io/component: worker
+data:
+  worker.yaml: |
+    server:
+      http_addr: ":8080"
+
+    worker:
+      queues:
+        {{- toYaml .Values.worker.config.queues | nindent 8 }}
+      concurrency: {{ .Values.worker.config.concurrency }}
+      heartbeat_interval: {{ .Values.worker.config.heartbeatInterval }}
+      shutdown_timeout: {{ .Values.worker.config.shutdownTimeout }}
+      task_timeout: {{ .Values.worker.config.taskTimeout }}
+
+    etcd:
+      endpoints:
+        {{- toYaml .Values.etcd.endpoints | nindent 8 }}
+      dial_timeout: 5s
+
+    redis:
+      {{- if .Values.redis.clusterMode }}
+      cluster_mode: true
+      cluster_addrs:
+        {{- toYaml .Values.redis.clusterAddrs | nindent 8 }}
+      {{- else }}
+      addr: {{ .Values.redis.addr }}
+      {{- end }}
+      password: {{ .Values.redis.password | quote }}
+      pool_size: {{ .Values.redis.poolSize }}
+
+    mysql:
+      dsn: {{ .Values.mysql.dsn | quote }}
+      max_open_conns: {{ .Values.mysql.maxOpenConns }}
+
+    metrics:
+      enabled: {{ .Values.metrics.enabled }}
+      addr: ":9091"
+      path: "/metrics"
+
+    log:
+      level: {{ .Values.log.level }}
+      format: {{ .Values.log.format }}
+      output: stdout
+{{- end }}

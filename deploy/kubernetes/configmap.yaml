@@ -1,18 +1,102 @@
 apiVersion: v1
 kind: ConfigMap
 metadata:
-  name: dispatchhub-config
+  name: dispatchhub-apiserver-config
   namespace: dispatchhub
 data:
-  config.yaml: |
+  apiserver.yaml: |
     server:
       grpc_addr: ":9090"
+      http_addr: ":8080"
+
+    etcd:
+      endpoints:
+        - etcd-0.etcd-headless.dispatchhub.svc.cluster.local:2379
+        - etcd-1.etcd-headless.dispatchhub.svc.cluster.local:2379
+        - etcd-2.etcd-headless.dispatchhub.svc.cluster.local:2379
+      dial_timeout: 5s
+
+    redis:
+      cluster_mode: true
+      cluster_addrs:
+        - redis-cluster-0.redis-cluster-headless.dispatchhub.svc.cluster.local:6379
+        - redis-cluster-1.redis-cluster-headless.dispatchhub.svc.cluster.local:6379
+        - redis-cluster-2.redis-cluster-headless.dispatchhub.svc.cluster.local:6379
+      pool_size: 100
+      min_idle_conns: 10
+
+    mysql:
+      dsn: "dispatchhub:${MYSQL_PASSWORD}@tcp(mysql.dispatchhub.svc.cluster.local:3306)/dispatchhub?charset=utf8mb4&parseTime=true&loc=Local"
+      max_open_conns: 50
+      max_idle_conns: 10
+      conn_max_lifetime: 1h
+
+    metrics:
+      enabled: true
+      addr: ":9091"
+      path: "/metrics"
+
+    log:
+      level: info
+      format: json
+      output: stdout
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: dispatchhub-scheduler-config
+  namespace: dispatchhub
+data:
+  scheduler.yaml: |
+    server:
       http_addr: ":8080"
 
     scheduler:
       lease_duration: 15s
       cron_check_interval: 1s
       cron_batch_size: 100
+
+    etcd:
+      endpoints:
+        - etcd-0.etcd-headless.dispatchhub.svc.cluster.local:2379
+        - etcd-1.etcd-headless.dispatchhub.svc.cluster.local:2379
+        - etcd-2.etcd-headless.dispatchhub.svc.cluster.local:2379
+      dial_timeout: 5s
+
+    redis:
+      cluster_mode: true
+      cluster_addrs:
+        - redis-cluster-0.redis-cluster-headless.dispatchhub.svc.cluster.local:6379
+        - redis-cluster-1.redis-cluster-headless.dispatchhub.svc.cluster.local:6379
+        - redis-cluster-2.redis-cluster-headless.dispatchhub.svc.cluster.local:6379
+      pool_size: 100
+      min_idle_conns: 10
+
+    mysql:
+      dsn: "dispatchhub:${MYSQL_PASSWORD}@tcp(mysql.dispatchhub.svc.cluster.local:3306)/dispatchhub?charset=utf8mb4&parseTime=true&loc=Local"
+      max_open_conns: 50
+      max_idle_conns: 10
+      conn_max_lifetime: 1h
+
+    metrics:
+      enabled: true
+      addr: ":9091"
+      path: "/metrics"
+
+    log:
+      level: info
+      format: json
+      output: stdout
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: dispatchhub-worker-config
+  namespace: dispatchhub
+data:
+  worker.yaml: |
+    server:
+      http_addr: ":8080"
 
     worker:
       queues:
