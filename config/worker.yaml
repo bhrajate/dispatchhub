@@ -1,0 +1,40 @@
+server:
+  http_addr: ":8080"
+
+worker:
+  queues:
+    - default
+    - high-priority
+  concurrency: 100
+  heartbeat_interval: 5s
+  shutdown_timeout: 30s
+  task_timeout: 5m
+
+etcd:
+  endpoints:
+    - localhost:2379
+  dial_timeout: 5s
+
+redis:
+  addr: localhost:6379
+  pool_size: 100
+  min_idle_conns: 10
+  dial_timeout: 5s
+  read_timeout: 3s
+  write_timeout: 3s
+
+mysql:
+  dsn: "root:@tcp(localhost:3306)/dispatchhub?charset=utf8mb4&parseTime=true&loc=Local"
+  max_open_conns: 50
+  max_idle_conns: 10
+  conn_max_lifetime: 1h
+
+metrics:
+  enabled: true
+  addr: ":9091"
+  path: "/metrics"
+
+log:
+  level: info
+  format: json
+  output: stdout

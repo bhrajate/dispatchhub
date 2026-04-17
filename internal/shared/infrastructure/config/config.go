@@ -8,36 +8,11 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-// Config is the root configuration for all DispatchHub components.
-type Config struct {
-	Server    ServerConfig    `yaml:"server"`
-	Scheduler SchedulerConfig `yaml:"scheduler"`
-	Worker    WorkerConfig    `yaml:"worker"`
-	Etcd      EtcdConfig      `yaml:"etcd"`
-	Redis     RedisConfig     `yaml:"redis"`
-	MySQL     MySQLConfig     `yaml:"mysql"`
-	Metrics   MetricsConfig   `yaml:"metrics"`
-	Log       LogConfig       `yaml:"log"`
-}
+// Shared infrastructure config types used by all services.
 
 type ServerConfig struct {
 	GRPCAddr string `yaml:"grpc_addr" env:"DISPATCH_GRPC_ADDR"`
 	HTTPAddr string `yaml:"http_addr" env:"DISPATCH_HTTP_ADDR"`
-}
-
-type SchedulerConfig struct {
-	LeaseDuration     time.Duration `yaml:"lease_duration"`
-	CronCheckInterval time.Duration `yaml:"cron_check_interval"`
-	CronBatchSize     int           `yaml:"cron_batch_size"`
-}
-
-type WorkerConfig struct {
-	ID                string        `yaml:"id"`
-	Queues            []string      `yaml:"queues"`
-	Concurrency       int           `yaml:"concurrency"`
-	HeartbeatInterval time.Duration `yaml:"heartbeat_interval"`
-	ShutdownTimeout   time.Duration `yaml:"shutdown_timeout"`
-	TaskTimeout       time.Duration `yaml:"task_timeout"`
 }
 
 type EtcdConfig struct {
@@ -82,93 +57,94 @@ type LogConfig struct {
 	Output string `yaml:"output"`
 }
 
-// DefaultConfig returns a configuration with sensible defaults.
-func DefaultConfig() *Config {
-	return &Config{
-		Server: ServerConfig{
-			GRPCAddr: ":9090",
-			HTTPAddr: ":8080",
-		},
-		Scheduler: SchedulerConfig{
-			LeaseDuration:     15 * time.Second,
-			CronCheckInterval: time.Second,
-			CronBatchSize:     100,
-		},
-		Worker: WorkerConfig{
-			Queues:            []string{"default"},
-			Concurrency:       100,
-			HeartbeatInterval: 5 * time.Second,
-			ShutdownTimeout:   30 * time.Second,
-			TaskTimeout:       5 * time.Minute,
-		},
-		Etcd: EtcdConfig{
-			Endpoints:   []string{"localhost:2379"},
-			DialTimeout: 5 * time.Second,
-		},
-		Redis: RedisConfig{
-			Addr:         "localhost:6379",
-			PoolSize:     100,
-			MinIdleConns: 10,
-			DialTimeout:  5 * time.Second,
-			ReadTimeout:  3 * time.Second,
-			WriteTimeout: 3 * time.Second,
-		},
-		MySQL: MySQLConfig{
-			DSN:             "root:@tcp(localhost:3306)/dispatchhub?charset=utf8mb4&parseTime=true&loc=Local",
-			MaxOpenConns:    50,
-			MaxIdleConns:    10,
-			ConnMaxLifetime: time.Hour,
-		},
-		Metrics: MetricsConfig{
-			Enabled: true,
-			Addr:    ":9091",
-			Path:    "/metrics",
-		},
-		Log: LogConfig{
-			Level:  "info",
-			Format: "json",
-			Output: "stdout",
-		},
+// Shared defaults for infrastructure configs.
+
+func DefaultEtcdConfig() EtcdConfig {
+	return EtcdConfig{
+		Endpoints:   []string{"localhost:2379"},
+		DialTimeout: 5 * time.Second,
 	}
 }
 
-// LoadFromFile reads config from a YAML file and merges with defaults.
-// After YAML parsing, environment variables override specific fields.
-func LoadFromFile(path string) (*Config, error) {
-	cfg := DefaultConfig()
+func DefaultRedisConfig() RedisConfig {
+	return RedisConfig{
+		Addr:         "localhost:6379",
+		PoolSize:     100,
+		MinIdleConns: 10,
+		DialTimeout:  5 * time.Second,
+		ReadTimeout:  3 * time.Second,
+		WriteTimeout: 3 * time.Second,
+	}
+}
+
+func DefaultMySQLConfig() MySQLConfig {
+	return MySQLConfig{
+		DSN:             "root:@tcp(localhost:3306)/dispatchhub?charset=utf8mb4&parseTime=true&loc=Local",
+		MaxOpenConns:    50,
+		MaxIdleConns:    10,
+		ConnMaxLifetime: time.Hour,
+	}
+}
+
+func DefaultMetricsConfig() MetricsConfig {
+	return MetricsConfig{
+		Enabled: true,
+		Addr:    ":9091",
+		Path:    "/metrics",
+	}
+}
+
+func DefaultLogConfig() LogConfig {
+	return LogConfig{
+		Level:  "info",
+		Format: "json",
+		Output: "stdout",
+	}
+}
+
+// LoadYAML reads a YAML file and unmarshals it into the target struct.
+func LoadYAML(path string, target any) error {
 	data, err := os.ReadFile(path)
 	if err != nil {
-		return nil, err
+		return err
 	}
-	if err := yaml.Unmarshal(data, cfg); err != nil {
-		return nil, err
-	}
-	applyEnvOverrides(cfg)
-	return cfg, nil
+	return yaml.Unmarshal(data, target)
 }
 
-// applyEnvOverrides overrides config fields from environment variables.
-// This enables sensitive values (passwords, DSNs) to be injected via K8s Secrets.
-func applyEnvOverrides(cfg *Config) {
+// ApplyEnvOverrides overrides infrastructure config fields from environment variables.
+
+func ApplyServerEnvOverrides(cfg *ServerConfig) {
 	if v := os.Getenv("DISPATCH_GRPC_ADDR"); v != "" {
-		cfg.Server.GRPCAddr = v
+		cfg.GRPCAddr = v
 	}
 	if v := os.Getenv("DISPATCH_HTTP_ADDR"); v != "" {
-		cfg.Server.HTTPAddr = v
+		cfg.HTTPAddr = v
 	}
+}
+
+func ApplyRedisEnvOverrides(cfg *RedisConfig) {
 	if v := os.Getenv("DISPATCH_REDIS_ADDR"); v != "" {
-		cfg.Redis.Addr = v
+		cfg.Addr = v
 	}
 	if v := os.Getenv("DISPATCH_REDIS_PASSWORD"); v != "" {
-		cfg.Redis.Password = v
+		cfg.Password = v
 	}
+}
+
+func ApplyMySQLEnvOverrides(cfg *MySQLConfig) {
 	if v := os.Getenv("DISPATCH_MYSQL_DSN"); v != "" {
-		cfg.MySQL.DSN = v
+		cfg.DSN = v
 	}
+}
+
+func ApplyEtcdEnvOverrides(cfg *EtcdConfig) {
 	if v := os.Getenv("DISPATCH_ETCD_ENDPOINTS"); v != "" {
-		cfg.Etcd.Endpoints = strings.Split(v, ",")
+		cfg.Endpoints = strings.Split(v, ",")
 	}
+}
+
+func ApplyLogEnvOverrides(cfg *LogConfig) {
 	if v := os.Getenv("DISPATCH_LOG_LEVEL"); v != "" {
-		cfg.Log.Level = v
+		cfg.Level = v
 	}
 }

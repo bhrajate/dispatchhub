@@ -82,7 +82,10 @@ dispatchhub/
 ├── pkg/{log,metrics,ratelimit,retry,signals,cronutil}/
 ├── api/proto/                          # Protobuf 定义
 ├── deploy/{kubernetes,helm}/           # K8s YAML + Helm Chart
-├── config.yaml                         # 示例配置
+├── config/                             # 各服务配置文件
+│   ├── apiserver.yaml
+│   ├── scheduler.yaml
+│   └── worker.yaml
 ├── Dockerfile                          # 多阶段构建
 └── Makefile                            # 构建自动化
 ```
@@ -121,42 +124,15 @@ kubectl apply -f deploy/kubernetes/    # 或原生 YAML
 
 ## 配置
 
-配置文件 `config.yaml`，支持环境变量覆盖 (`DISPATCH_MYSQL_DSN`, `DISPATCH_REDIS_PASSWORD` 等)。
+三个服务使用独立的配置文件，支持环境变量覆盖 (`DISPATCH_MYSQL_DSN`, `DISPATCH_REDIS_PASSWORD` 等)。
 
-```yaml
-server:
-  grpc_addr: ":9090"
-  http_addr: ":8080"
-
-scheduler:
-  lease_duration: 15s           # etcd Lease TTL
-  cron_check_interval: 1s       # CronJob 扫描间隔
-  cron_batch_size: 100          # 每次最多触发的 CronJob 数
-
-worker:
-  queues: [default, high-priority]
-  concurrency: 100              # 协程池信号量容量
-  heartbeat_interval: 5s
-  shutdown_timeout: 30s         # 优雅停机等待时间
-  task_timeout: 5m
-
-redis:
-  addr: localhost:6379
-  pool_size: 100
-
-mysql:
-  dsn: "root:@tcp(localhost:3306)/dispatchhub?charset=utf8mb4&parseTime=true&loc=Local"
-  max_open_conns: 50
-
-etcd:
-  endpoints: [localhost:2379]
-  dial_timeout: 5s
-
-metrics:
-  enabled: true
-  addr: ":9091"
-  path: "/metrics"
+```bash
+./apiserver  --config=config/apiserver.yaml
+./scheduler  --config=config/scheduler.yaml
+./worker     --config=config/worker.yaml
 ```
+
+每个配置文件只包含该服务需要的配置项（如 Worker 配置无 `scheduler` 段，API Server 配置无 `worker` 段），共享基础设施段（redis、mysql、etcd、log、metrics）。详见 [配置参考文档](docs/configuration.md)。
 
 ## API 示例
 
