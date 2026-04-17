@@ -112,10 +112,19 @@ func (w *WorkerAppService) Use(mw ...Middleware) {
 func (w *WorkerAppService) Run(ctx context.Context) error {
 	hostname, _ := os.Hostname()
 	now := time.Now()
+
+	w.mu.RLock()
+	taskTypes := make([]string, 0, len(w.handlers))
+	for t := range w.handlers {
+		taskTypes = append(taskTypes, t)
+	}
+	w.mu.RUnlock()
+
 	w.info = &entity.WorkerInfo{
 		ID:            w.cfg.ID,
 		Hostname:      hostname,
 		Queues:        w.cfg.Queues,
+		TaskTypes:     taskTypes,
 		Concurrency:   w.cfg.Concurrency,
 		State:         entity.WorkerStateOnline,
 		StartedAt:     now,

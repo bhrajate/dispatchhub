@@ -58,7 +58,7 @@ DispatchHub 是一个分布式任务调度系统，由三个可独立部署的�
 
 | 组件 | 二进制 | 连接的基础设施 | 对外 API | 核心职责 |
 |------|--------|---------------|----------|----------|
-| API Server | `cmd/apiserver` | Redis + MySQL | HTTP REST `:8080` + gRPC `:9090` + healthz/readyz/metrics | 任务和 CronJob 的完整 CRUD |
+| API Server | `cmd/apiserver` | Redis + MySQL + etcd (只读) | HTTP REST `:8080` + gRPC `:9090` + healthz/readyz/metrics | 任务和 CronJob 的完整 CRUD, queue+type 路由校验 |
 | Scheduler | `cmd/scheduler` | etcd + Redis + MySQL | 仅 `/healthz` `/readyz` `/metrics` (运维端点) | Leader 选举, 7 个后台循环 |
 | Worker | `cmd/worker` | etcd + Redis + MySQL | 仅 `/healthz` `/readyz` `/metrics` (运维端点) | 拉取任务、执行、心跳上报 |
 
@@ -68,7 +68,7 @@ DispatchHub 是一个分布式任务调度系统，由三个可独立部署的�
 
 > 源码: `cmd/apiserver/main.go`, `internal/apiserver/`
 
-API Server 是**系统唯一的外部入口**。纯无状态网关，不连接 etcd，不参与 Leader 选举，不运行调度循环，不执行任务。可部署任意数量副本，前置 LoadBalancer/Ingress 即可水平扩展。
+API Server 是**系统唯一的外部入口**。纯无状态网关，不参与 Leader 选举，不运行调度循环，不执行任务。可部署任意数量副本，前置 LoadBalancer/Ingress 即可水平扩展。
 
 ### 连接的基础设施
 
@@ -76,8 +76,7 @@ API Server 是**系统唯一的外部入口**。纯无状态网关，不连接 e
 
 - **Redis**: `persistence.NewRedisClient(cfg.Redis)` -- 用于入队/延迟入队/队列统计
 - **MySQL**: `persistence.NewMySQLDB(cfg.MySQL)` -- 用于任务和 CronJob 持久化
-
-不连接 etcd。
+- **etcd**: `persistence.NewEtcdClient(cfg.Etcd)` -- 只读，用于 RouteValidator 获取 Worker 拓扑，校验 queue+type 路由可行性（带缓存，fail-open）
 
 ### 暴露的接口
 
@@ -106,6 +105,7 @@ SubmitTask, GetTask, ListTasks, CancelTask, GetQueueStats, CreateCronJob, GetCro
 
 - **TaskServiceImpl** (`internal/apiserver/domain/service/task_service_impl.go`): 实现 `TaskService` 接口，包含 Task CRUD 和 CronJob CRUD
 - **BeforeSubmit hook**: 在 `cmd/apiserver/main.go` 中注入，用于令牌桶限流 (`pkg/ratelimit`)
+- **RouteValidator** (`internal/apiserver/domain/service/route_validator.go`): 校验 queue+type 组合是否有在线 Worker 可处理，防止任务投递到无法处理的队列（[详见修复文档](2026-04-17-queue-type-route-validation.md)）
 - **AfterSubmit hook**: 在 `cmd/apiserver/main.go` 中注入，用于 Prometheus 指标递增和日志记录
 - **readyz 健康检查**: 通过 `HealthChecker` 回调检查 Redis Ping + MySQL Ping，3s 超时
 - **HTTP 错误处理**: 内部错误记录详细日志 (`log.Errorf`)，对客户端返回通用错误消息 ("failed to submit task")
@@ -253,6 +253,7 @@ w.registry.Heartbeat(ctx, w.info)
 
 - `WorkerInfo` 没有独立的 Heartbeat struct，直接用 `*WorkerInfo` 整体
 - `LastHeartbeat` 在注册时初始化为 `time.Now()`，避免刚注册就被判定为 stale
+- `TaskTypes` 在 `Run()` 启动时从已注册的 handlers map 收集，随 Register/Heartbeat 写入 etcd，供 API Server 的 RouteValidator 做路由校验
 - Worker version 使用 `version.Version` (通过 ldflags 注入)
 
 ### 优雅停机
@@ -298,7 +299,7 @@ Worker(N) ──Dequeue──────────────── Redis <�
 | 基础设施 | API Server | Scheduler | Worker |
 |---------|------------|-----------|--------|
 | **Redis** | 写: Enqueue, EnqueueDelayed | 读: Stats, 写: PromoteDelayed, EnqueueIfNotInflight | 读: Dequeue, 写: Ack, Nack |
-| **etcd** | -- | 读: WatchWorkers, ListWorkers, 写: Leader 选举 (Campaign/Resign) | 写: Register, Deregister, Heartbeat |
+| **etcd** | 读: ListWorkers (RouteValidator, 带缓存) | 读: WatchWorkers, ListWorkers, 写: Leader 选举 (Campaign/Resign) | 写: Register, Deregister, Heartbeat |
 | **MySQL** | 读: Get, List, 写: Create, Update | 读: FindStaleByState, FindDueCronJobs, HasRunningTasks, 写: Create (cron task), UpdateCronJob, TouchUpdatedAt, DeleteTerminalOlderThan | 读: Get (终态检查), 写: Update (Running/Completed/Failed/Retrying) |
 
 ---
@@ -352,28 +353,31 @@ Worker(N) ──Dequeue──────────────── Redis <�
                                        |
 3.                        BeforeSubmit hook (限流检查)
                                        |
-4.                            ┌────────┴────────┐
+4.                        RouteValidator.Validate()
+                          (校验 queue+type 路由可行性)
+                                       |
+5.                            ┌────────┴────────┐
                               |                 |
                               v                 v
                         MySQL.Create()    Redis.Enqueue()
                         (持久化, 先执行)    (入队, 失败不返错)
                               |                 |
-5.                  AfterSubmit hook       Worker.fetchLoop()
+6.                  AfterSubmit hook       Worker.fetchLoop()
                     (日志 + 指标)                |
                                                 v
                                           Redis.Dequeue()   <-- Lua 原子出队+移入inflight
                                                 |
-6.                                    MySQL.Get() 终态检查
+7.                                    MySQL.Get() 终态检查
                                                 |
-7.                                    taskStore.Update(Running)
+8.                                    taskStore.Update(Running)
                                                 |
-8.                                    中间件链(Recovery/Logging/Timeout)
+9.                                    中间件链(Recovery/Logging/Timeout)
                                                 |
                                           Handler.Handle()
                                                 |
                                       ┌─────────┴─────────┐
                                       |                   |
-9.                               成功: Ack()          失败: Nack()
+10.                              成功: Ack()          失败: Nack()
                                       |                   |
                                       v                   v
                                 MySQL.Update       CanRetry?
@@ -478,9 +482,9 @@ Scheduler.compensateLoop() (每 30s 执行)
 3. **Lease 机制**: 天然支持节点临时注册 (TTL=15s)，Worker 崩溃后自动清理
 4. **强一致性**: Raft 协议保证数据一致，适合 Leader 选举场景
 
-### 为什么 API Server 不连接 etcd?
+### 为什么 API Server 对 etcd 是只读轻量依赖?
 
-API Server 仅需要读写任务数据 (MySQL) 和入队 (Redis)，不需要感知 Worker 拓扑或参与选举。减少依赖项提升 API Server 的可用性 -- 即使 etcd 不可用，任务提交和查询仍然正常工作。
+API Server 连接 etcd 仅用于 RouteValidator 读取 Worker 拓扑（`ListWorkers`），校验 queue+type 路由可行性。这是只读、带缓存（10s 刷新）、fail-open 的轻量依赖——etcd 不可用时任务提交仍然正常工作。API Server 不使用 etcd 的 Watch/Lease/Campaign，不参与选举。详见 [queue-type 路由校验文档](2026-04-17-queue-type-route-validation.md)。
 
 ### 为什么 Worker 使用拉模型 (Pull) 而非推模型 (Push)?
 

@@ -230,6 +230,20 @@ default        ──▶  普通任务 (邮件发送, 数据同步)
 batch          ──▶  批量任务 (报表生成, 数据导出)
 ```
 
+### 路由校验
+
+Queue 和 Task Type 是正交维度——同一 Type 可走不同 Queue，同一 Queue 可承载多种 Type。为防止任务被投递到无法处理的队列，API Server 在提交时通过 RouteValidator 校验 queue+type 组合的可行性：
+
+```
+SubmitTask(type="video.transcode", queue="email-queue")
+    ↓
+RouteValidator: email-queue 上无 Worker 注册 "video.transcode" Handler
+    ↓
+拒绝: "no worker on queue "email-queue" handles task type "video.transcode""
+```
+
+RouteValidator 从 etcd 读取 Worker 拓扑（WorkerInfo.Queues + WorkerInfo.TaskTypes），构建 `queue → {types}` 映射。采用 fail-open 策略：无 Worker 在线或缓存刷新失败时放行，不阻塞提交。详见 [路由校验修复文档](2026-04-17-queue-type-route-validation.md)。
+
 ### 队列统计
 
 通过 Stats 方法获取队列实时状态：
