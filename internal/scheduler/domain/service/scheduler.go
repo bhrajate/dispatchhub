@@ -43,7 +43,6 @@ type SchedulerService struct {
 
 	mu      sync.RWMutex
 	workers map[string]*entity.WorkerInfo
-	queues  []string
 }
 
 // NewSchedulerService creates a new SchedulerService.
@@ -59,7 +58,6 @@ func NewSchedulerService(
 		cronMaint: cronMaint,
 		registry:  registry,
 		workers:   make(map[string]*entity.WorkerInfo),
-		queues:    []string{entity.DefaultQueueName},
 	}
 }
 
@@ -170,23 +168,10 @@ func (s *SchedulerService) SyncWorkers(ctx context.Context) (int, error) {
 	defer s.mu.Unlock()
 
 	s.workers = make(map[string]*entity.WorkerInfo, len(workers))
-	queueSet := make(map[string]struct{})
 	for _, w := range workers {
 		if w.State == entity.WorkerStateOnline {
 			s.workers[w.ID] = w
-			for _, q := range w.Queues {
-				queueSet[q] = struct{}{}
-			}
 		}
-	}
-
-	// Dynamically discover queues from registered workers
-	s.queues = make([]string, 0, len(queueSet))
-	for q := range queueSet {
-		s.queues = append(s.queues, q)
-	}
-	if len(s.queues) == 0 {
-		s.queues = []string{entity.DefaultQueueName}
 	}
 
 	return len(s.workers), nil
@@ -228,13 +213,27 @@ func (s *SchedulerService) DetectStaleWorkers(staleThreshold time.Duration) []st
 	return staleWorkers
 }
 
-// Queues returns the list of known queues.
+// Queues returns the list of known queues, derived from online workers.
 func (s *SchedulerService) Queues() []string {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	result := make([]string, len(s.queues))
-	copy(result, s.queues)
-	return result
+
+	queueSet := make(map[string]struct{})
+	for _, w := range s.workers {
+		for _, q := range w.Queues {
+			queueSet[q] = struct{}{}
+		}
+	}
+
+	if len(queueSet) == 0 {
+		return []string{entity.DefaultQueueName}
+	}
+
+	queues := make([]string, 0, len(queueSet))
+	for q := range queueSet {
+		queues = append(queues, q)
+	}
+	return queues
 }
 
 // Broker returns the queue broker.
