@@ -84,15 +84,13 @@ func (le *LeaderElector) campaign(ctx context.Context) error {
 	// exit before this function returns, preventing goroutine leaks
 	// and data races across campaign retries.
 	observeCtx, observeCancel := context.WithCancel(ctx)
-	defer observeCancel()
 
 	var observeWg sync.WaitGroup
-	observeWg.Add(1)
-	go func() {
-		defer observeWg.Done()
+	observeWg.Go(func() {
 		le.observe(observeCtx, election)
-	}()
+	})
 	defer observeWg.Wait()
+	defer observeCancel()
 
 	log.Infof("campaigning for leader: %s", le.id)
 	if err := election.Campaign(ctx, le.id); err != nil {
