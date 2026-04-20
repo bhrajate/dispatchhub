@@ -103,7 +103,7 @@ func (le *LeaderElector) observe(ctx context.Context, election *concurrency.Elec
 
 ### 2.3 scoped context + WaitGroup 防止 goroutine 泄漏
 
-为 observe 创建独立的 context，并通过 WaitGroup 保证 observe goroutine 在 `campaign()` 返回前完全退出：
+为 observe 创建独立的 context，并通过 WaitGroup 保证 observe goroutine 在 `campaign()` 返回前完全退出。本次修复引入的代码如下（**注意：当时 defer 注册顺序存在缺陷，后由 [2026-04-17 修复](2026-04-17-election-defer-deadlock-fix.md) 纠正**）：
 
 ```go
 func (le *LeaderElector) campaign(ctx context.Context) error {
@@ -117,30 +117,28 @@ func (le *LeaderElector) campaign(ctx context.Context) error {
 
     // scoped context：campaign 退出时通知 observe 停止
     observeCtx, observeCancel := context.WithCancel(ctx)
-    defer observeCancel()
 
     // WaitGroup：保证 observe 完全退出后 campaign 才返回
     var observeWg sync.WaitGroup
-    observeWg.Add(1)
-    go func() {
-        defer observeWg.Done()
+    observeWg.Go(func() {
         le.observe(observeCtx, election)
-    }()
-    defer observeWg.Wait()
+    })
+    defer observeWg.Wait()   // 注册#1 → LIFO 执行#2
+    defer observeCancel()    // 注册#2 → LIFO 执行#1（先取消，再等待）
 
     // ... 后续逻辑不变 ...
 }
 ```
 
-**defer 执行顺序**（LIFO）保证正确的清理时序：
+**defer 执行顺序（LIFO）保证正确的清理时序**：
 
 ```
-1. observeWg.Wait()    — 等待 observe goroutine 退出
-2. observeCancel()     — 取消 observe 的 context（触发退出）
-3. session.Close()     — 关闭 etcd session
+1. observeCancel()     — 先取消 observe 的 context（触发退出）
+2. observeWg.Wait()    — 等待 observe goroutine 完全退出
+3. session.Close()     — 最后关闭 etcd session
 ```
 
-实际上 `observeCancel()` 先执行，observe 收到取消信号退出后，`observeWg.Wait()` 才返回，最后 `session.Close()` 清理底层资源。
+> **历史注记**：本次修复初版将 `defer observeCancel()` 注册在 `defer observeWg.Wait()` 之前，按 LIFO 反而导致 Wait 先于 Cancel 执行，在 etcd session 过期场景下触发死锁。该缺陷由 [2026-04-17 修复](2026-04-17-election-defer-deadlock-fix.md) 通过交换 defer 注册顺序解决，同时利用 Go 1.25 的 `WaitGroup.Go()` 简化 goroutine 创建。当前代码已包含两次修复的全部内容。
 
 ## 三、修复效果
 

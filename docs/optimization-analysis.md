@@ -1,8 +1,36 @@
 # DispatchHub 项目优化分析与修复方案
 
 > 分析日期：2026-04-14
+> 状态回顾：2026-04-20
 > 分析范围：全量代码审查（DDD 架构、并发安全、性能、健壮性）
 > 当前分支：refactor/ddd-architecture
+
+---
+
+## 状态一览（2026-04-20 回顾）
+
+| 优先级 | 编号 | 问题 | 状态 |
+|--------|------|------|------|
+| P0 | 1.1 | 乐观锁 + 悲观锁混用 | ✅ 已修复 |
+| P0 | 1.2 | Labels/Duration GORM 序列化 | ✅ 已修复（方案细节见 §1.2 注记） |
+| P0 | 1.3 | leases map 并发不安全 | ✅ 已修复 |
+| P0 | 1.4 | CancelTask 未移除队列 | ✅ 已修复（采用综合方案，详见 [2026-04-16-task-cancellation.md](2026-04-16-task-cancellation.md)） |
+| P1 | 2.1 | Heartbeat 冗余读 etcd | ✅ 已修复 |
+| P1 | 2.2 | fetchLoop 固定间隔空轮询 | ✅ 已修复（指数退避） |
+| P1 | 2.3 | readyz 探针未检查依赖 | ✅ 已修复（注入 healthCheck 回调） |
+| P1 | 2.4 | 双写失败返回 error | ✅ 已修复 |
+| P2 | 3.1 | 初始化代码重复 | ✅ 已修复（`persistence/factory.go`） |
+| P2 | 3.2 | Scheduler 队列列表静态 | ✅ 已修复（动态派生，详见 [2026-04-16-scheduler-queues-consistency.md](2026-04-16-scheduler-queues-consistency.md)） |
+| P2 | 3.3 | env tag 未实际生效 | ✅ 已修复（`applyEnvOverrides`） |
+| P2 | 3.4 | CronJob 无并发控制 | ✅ 已修复（`ConcurrencyPolicy`） |
+| P3 | 4.1 | HTTP 错误泄露内部信息 | ✅ 已修复 |
+| P3 | 4.2 | 缺少 Task TTL 清理 | ✅ 已修复（`cleanupLoop`） |
+| P3 | 4.3 | Rate Limiter 忙等待 | ❌ **未修复**（见 TODO） |
+| P3 | 4.4 | Worker version 硬编码 | ✅ 已修复 |
+| P3 | 4.5 | Promote batch size 硬编码 | ✅ 已修复 |
+| P3 | 4.6 | TouchUpdatedAt 错误静默 | ❌ **未修复**（见 TODO） |
+
+> 下文保留原始分析，供回溯参考。每一节的"状态"行标注当前实际进展；未修复条目会同步记录在 [TODO.md](TODO.md)。
 
 ---
 
@@ -10,7 +38,9 @@
 
 ### 1.1 乐观锁与悲观锁混用
 
-**文件：** `internal/shared/infrastructure/persistence/mysql/task_repository.go:43-59`
+**文件：** `internal/shared/infrastructure/persistence/mysql/task_repository.go:42-58`
+
+**状态：** ✅ 已修复 — `clause.Locking{Strength:"UPDATE"}` 已移除，保留纯乐观锁（`WHERE id = ? AND version = ?`）。
 
 **问题：**
 
@@ -60,6 +90,8 @@ func (s *TaskRepository) Update(ctx context.Context, task *entity.Task) error {
 ### 1.2 Labels 和 Duration 缺少 GORM 序列化支持
 
 **文件：** `internal/shared/domain/entity/task.go`
+
+**状态：** ✅ 已修复。`Labels` 按 JSON 文本存储；`Duration` 实际实现采用 **int64 纳秒**（而非文档原方案中的 `String()` 文本），查询和计算更方便，具体代码见 `entity/task.go:109-184`。
 
 **问题：**
 
@@ -142,7 +174,9 @@ func (d *Duration) Scan(value interface{}) error {
 
 ### 1.3 WorkerRegistry.leases map 缺少并发保护
 
-**文件：** `internal/shared/infrastructure/persistence/etcd/worker_registry.go:20-23`
+**文件：** `internal/shared/infrastructure/persistence/etcd/worker_registry.go:20-26`
+
+**状态：** ✅ 已修复 — `sync.RWMutex` 已加入，`Register / Deregister / Heartbeat` 均通过互斥访问 `leases` map。
 
 **问题：**
 
@@ -207,7 +241,9 @@ func (r *WorkerRegistry) Heartbeat(ctx context.Context, hb *entity.Heartbeat) er
 
 ### 1.4 CancelTask 没有从 Redis 队列移除任务
 
-**文件：** `internal/apiserver/domain/service/task_service_impl.go:101-117`
+**文件：** `internal/apiserver/domain/service/task_service_impl.go:114-144`
+
+**状态：** ✅ 已修复 — 最终采用**方案 A + B 综合方案**：CancelTask 同时调用 `broker.Remove`（从 ready/delayed/inflight 三处删除）和 `broker.PublishCancel`（通知正在执行的 Worker 取消 context），Worker 侧也增加了 MySQL 二次校验。完整设计见 [2026-04-16-task-cancellation.md](2026-04-16-task-cancellation.md)。
 
 **问题：**
 
@@ -264,7 +300,9 @@ type QueueBroker interface {
 
 ### 2.1 Heartbeat 每次都要读 etcd
 
-**文件：** `internal/shared/infrastructure/persistence/etcd/worker_registry.go:84-111`
+**文件：** `internal/shared/infrastructure/persistence/etcd/worker_registry.go:95-111`
+
+**状态：** ✅ 已修复 — 采用方案一：`Heartbeat` 直接接收完整 `*entity.WorkerInfo`，Worker 本地维护 info，每次心跳只产生一次 etcd PUT。
 
 **问题：**
 
@@ -337,7 +375,9 @@ func (w *WorkerAppService) heartbeatLoop(ctx context.Context) {
 
 ### 2.2 Worker fetchLoop 空轮询优化
 
-**文件：** `internal/worker/application/service/worker_app_service.go:152-190`
+**文件：** `internal/worker/application/service/worker_app_service.go:175-224`
+
+**状态：** ✅ 已修复 — 指数退避已实现，minBackoff = 100ms，maxBackoff = 2s，拉到任务则重置退避。
 
 **问题：**
 
@@ -415,9 +455,11 @@ func (w *WorkerAppService) fetchLoop(ctx context.Context) {
 ### 2.3 readyz 探针未检查依赖健康
 
 **文件：**
-- `internal/apiserver/interfaces/http/server.go:311-313`
-- `cmd/scheduler/main.go:178-181`
-- `cmd/worker/main.go:148-151`
+- `internal/apiserver/interfaces/http/server.go:326-336`
+- `cmd/scheduler/main.go`
+- `cmd/worker/main.go`
+
+**状态：** ✅ 已修复 — Server 新增 `healthCheck func(ctx) error` 回调字段，由 `cmd/*/main.go` 在启动时注入 Redis/MySQL/etcd 的 Ping 检查函数；readyz 调用该回调，任一依赖不可用返回 503。
 
 **问题：**
 
@@ -476,7 +518,9 @@ func (s *Server) handleReadyz(w http.ResponseWriter, r *http.Request) {
 
 ### 2.4 SubmitTask 双写错误处理策略
 
-**文件：** `internal/apiserver/domain/service/task_service_impl.go:79-91`
+**文件：** `internal/apiserver/domain/service/task_service_impl.go:92-111`
+
+**状态：** ✅ 已修复 — Redis 入队失败不再返回 error（用 `_ =` 丢弃），依赖 Scheduler 的 `CompensateOrphanedTasks` 循环（30s）兜底重入队，避免客户端重试产生重复任务。
 
 **问题：**
 
@@ -539,9 +583,11 @@ func (s *TaskServiceImpl) SubmitTask(ctx context.Context, task *entity.Task) err
 ### 3.1 基础设施初始化代码重复
 
 **文件：**
-- `cmd/apiserver/main.go:64-93`
-- `cmd/scheduler/main.go:67-116`
-- `cmd/worker/main.go:63-102`
+- `cmd/apiserver/main.go`
+- `cmd/scheduler/main.go`
+- `cmd/worker/main.go`
+
+**状态：** ✅ 已修复 — 共享工厂已提取到 `internal/shared/infrastructure/persistence/factory.go`，导出 `NewRedisClient / NewMySQLDB / NewEtcdClient` 供三个 main 文件复用。
 
 **问题：**
 
@@ -636,7 +682,9 @@ etcdClient, err := infrastructure.NewEtcdClient(cfg.Etcd)
 
 ### 3.2 Scheduler 的 queues 列表是静态的
 
-**文件：** `internal/scheduler/domain/service/scheduler.go:63`
+**文件：** `internal/scheduler/domain/service/scheduler.go:217-237`
+
+**状态：** ✅ 已修复 — 最终采用方案二（动态发现）并更进一步：彻底删除了 `queues` 字段，`Queues()` 方法直接从 `workers` 实时派生，消除了冗余状态的不一致风险。详见 [2026-04-16-scheduler-queues-consistency.md](2026-04-16-scheduler-queues-consistency.md)。
 
 **问题：**
 
@@ -707,7 +755,9 @@ func (s *SchedulerService) SyncWorkers(ctx context.Context) (int, error) {
 
 ### 3.3 Config 的 env tag 未实际生效
 
-**文件：** `internal/shared/infrastructure/config/config.go`
+**文件：** `internal/shared/infrastructure/config/config.go:117-147`
+
+**状态：** ✅ 已修复 — `applyEnvOverrides` 已实现，覆盖 `DISPATCH_{GRPC_ADDR,HTTP_ADDR,REDIS_ADDR,REDIS_PASSWORD,MYSQL_DSN,ETCD_ENDPOINTS,LOG_LEVEL}` 等关键环境变量。
 
 **问题：**
 
@@ -771,7 +821,9 @@ func applyEnvOverrides(cfg *Config) {
 
 ### 3.4 CronJob 缺少并发执行控制
 
-**文件：** `internal/scheduler/domain/service/scheduler.go:69-114`
+**文件：** `internal/scheduler/domain/service/scheduler.go:67-127`
+
+**状态：** ✅ 已修复 — `CronJob.ConcurrencyPolicy` 已支持 `Allow/Forbid`，触发前通过 `taskMaint.HasRunningTasks` 判断；Forbid 策略下跳过本次但推进 `next_run_at`，避免重复触发累积。
 
 **问题：**
 
@@ -829,7 +881,9 @@ func (s *SchedulerService) TriggerDueCronJobs(ctx context.Context, limit int) (i
 
 ### 4.1 HTTP 错误处理泄露内部信息
 
-**文件：** `internal/apiserver/interfaces/http/server.go`
+**文件：** `internal/apiserver/interfaces/http/server.go:122-125`
+
+**状态：** ✅ 已修复 — SubmitTask 错误已改为 `log.Errorf` + 通用提示：`writeError(w, 500, "failed to submit task")`。
 
 **问题：**
 
@@ -854,6 +908,8 @@ func (s *Server) handleSubmitTask(w http.ResponseWriter, r *http.Request) {
 ---
 
 ### 4.2 缺少 Task 的 TTL / 自动清理机制
+
+**状态：** ✅ 已修复 — `TaskRepository.DeleteTerminalOlderThan` 已实现，Scheduler 新增 `cleanupLoop`（默认每小时执行一次，清理 7 天前的终态任务）。
 
 **问题：**
 
@@ -907,6 +963,8 @@ func (s *SchedulerAppService) cleanupLoop(ctx context.Context) {
 ### 4.3 Rate Limiter 的 Wait 方法使用忙等待
 
 **文件：** `pkg/ratelimit/ratelimit.go:42-53`
+
+**状态：** ❌ **未修复** — 当前仍使用 10ms 固定 polling。此问题已同步到 [TODO.md](TODO.md)，优先级 P3，可在下一轮迭代中处理。
 
 **问题：**
 
@@ -962,7 +1020,9 @@ func (l *Limiter) Wait(ctx context.Context) error {
 
 ### 4.4 Worker version 硬编码
 
-**文件：** `internal/worker/application/service/worker_app_service.go:119`
+**文件：** `internal/worker/application/service/worker_app_service.go:123-133`
+
+**状态：** ✅ 已修复 — `WorkerInfo.Version` 已改为 `version.Version`（由 ldflags 在编译时注入）。
 
 **问题：**
 
@@ -990,7 +1050,9 @@ w.info = &entity.WorkerInfo{
 
 ### 4.5 PromoteDelayed Lua 脚本硬编码 batch size
 
-**文件：** `internal/shared/infrastructure/persistence/redis/queue_broker.go:179-193`
+**文件：** `internal/shared/infrastructure/persistence/redis/queue_broker.go:179-210`
+
+**状态：** ✅ 已修复 — `PromoteDelayed(ctx, queue, batchSize)` 已参数化，Lua 脚本通过 `ARGV[2]` 接收 batch。
 
 **问题：**
 
@@ -1025,7 +1087,9 @@ func (q *QueueBroker) PromoteDelayed(ctx context.Context, queue string, batchSiz
 
 ### 4.6 TouchUpdatedAt 错误被静默忽略
 
-**文件：** `internal/scheduler/domain/service/scheduler.go:134`
+**文件：** `internal/scheduler/domain/service/scheduler.go:147`
+
+**状态：** ❌ **未修复** — 当前代码仍为 `_ = s.taskMaint.TouchUpdatedAt(ctx, task.ID)`。此问题已同步到 [TODO.md](TODO.md)，优先级 P3。
 
 **问题：**
 

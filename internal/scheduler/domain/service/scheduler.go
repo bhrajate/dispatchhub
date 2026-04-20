@@ -9,6 +9,7 @@ import (
 	"github.com/dispatchhub/dispatchhub/internal/shared/domain/entity"
 	"github.com/dispatchhub/dispatchhub/internal/shared/domain/repository"
 	"github.com/dispatchhub/dispatchhub/pkg/cronutil"
+	"github.com/dispatchhub/dispatchhub/pkg/log"
 	"github.com/google/uuid"
 )
 
@@ -144,7 +145,9 @@ func (s *SchedulerService) CompensateOrphanedTasks(ctx context.Context, olderTha
 			// Refresh updated_at WITHOUT incrementing version, so:
 			// 1. Next compensate cycle won't re-pick this task (updated_at is fresh)
 			// 2. Worker can still Update with the original version from Redis JSON
-			_ = s.taskMaint.TouchUpdatedAt(ctx, task.ID)
+			if err := s.taskMaint.TouchUpdatedAt(ctx, task.ID); err != nil {
+				log.Warnf("task %s: touch updated_at failed (may cause re-compensation): %v", task.ID, err)
+			}
 			compensated++
 		}
 	}
