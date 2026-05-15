@@ -30,7 +30,7 @@
 | P3 | 4.5 | Promote batch size 硬编码 | ✅ 已修复 |
 | P3 | 4.6 | TouchUpdatedAt 错误静默 | ❌ **未修复**（见 TODO） |
 
-> 下文保留原始分析，供回溯参考。每一节的"状态"行标注当前实际进展；未修复条目会同步记录在 [TODO.md](TODO.md)。
+> 下文保留原始分析，供回溯参考。每一节的"状态"行标注当前实际进展；未修复条目会同步记录在 [TODO.md](../TODO.md)。
 
 ---
 
@@ -964,7 +964,7 @@ func (s *SchedulerAppService) cleanupLoop(ctx context.Context) {
 
 **文件：** `pkg/ratelimit/ratelimit.go:42-53`
 
-**状态：** ❌ **未修复** — 当前仍使用 10ms 固定 polling。此问题已同步到 [TODO.md](TODO.md)，优先级 P3，可在下一轮迭代中处理。
+**状态：** ❌ **未修复** — 当前仍使用 10ms 固定 polling。此问题已同步到 [TODO.md](../TODO.md)，优先级 P3，可在下一轮迭代中处理。
 
 **问题：**
 
@@ -1089,7 +1089,7 @@ func (q *QueueBroker) PromoteDelayed(ctx context.Context, queue string, batchSiz
 
 **文件：** `internal/scheduler/domain/service/scheduler.go:147`
 
-**状态：** ❌ **未修复** — 当前代码仍为 `_ = s.taskMaint.TouchUpdatedAt(ctx, task.ID)`。此问题已同步到 [TODO.md](TODO.md)，优先级 P3。
+**状态：** ❌ **未修复** — 当前代码仍为 `_ = s.taskMaint.TouchUpdatedAt(ctx, task.ID)`。此问题已同步到 [TODO.md](../TODO.md)，优先级 P3。
 
 **问题：**
 

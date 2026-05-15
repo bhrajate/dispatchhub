@@ -132,7 +132,7 @@ kubectl apply -f deploy/kubernetes/    # 或原生 YAML
 ./worker     --config=config/worker.yaml
 ```
 
-每个配置文件只包含该服务需要的配置项（如 Worker 配置无 `scheduler` 段，API Server 配置无 `worker` 段），共享基础设施段（redis、mysql、etcd、log、metrics）。详见 [配置参考文档](docs/configuration.md)。
+每个配置文件只包含该服务需要的配置项（如 Worker 配置无 `scheduler` 段，API Server 配置无 `worker` 段），共享基础设施段（redis、mysql、etcd、log、metrics）。详见 [配置参考文档](docs/reference/configuration.md)。
 
 ## API 示例
 
@@ -172,18 +172,15 @@ curl http://localhost:8080/api/v1/queues/default/stats
 
 ## 文档
 
-| 文档 | 内容 |
+完整索引见 [docs/README.md](docs/README.md)。常用入口：
+
+| 分组 | 文档 |
 |------|------|
-| [架构设计](docs/architecture.md) | 整体架构与设计决策 |
-| [核心组件](docs/components.md) | Scheduler / Worker / 存储层 |
-| [数据模型](docs/data-models.md) | Task / Worker / CronJob 数据结构与状态机 |
-| [存储层设计](docs/storage.md) | MySQL / Redis / etcd 选型与容量规划 |
-| [队列选型分析](docs/queue-selection.md) | 6 种 MQ 方案对比与决策推导 |
-| [队列设计](docs/queue-design.md) | 优先级队列 / 延迟队列 / Lua 脚本详解 |
-| [API 参考](docs/api-reference.md) | REST + gRPC 接口文档 |
-| [部署指南](docs/deployment.md) | K8s 部署 / Helm Chart / 运维手册 |
-| [配置参考](docs/configuration.md) | 全部配置项说明 |
-| [面试指南](docs/interview.md) | 项目介绍与常见追问 |
+| 架构设计 | [架构总览](docs/architecture/architecture.md) · [核心组件](docs/architecture/components.md) · [数据模型](docs/architecture/data-models.md) · [存储层设计](docs/architecture/storage.md) · [队列选型分析](docs/architecture/queue-selection.md) · [队列设计](docs/architecture/queue-design.md) |
+| 接口与运维 | [API 参考](docs/reference/api-reference.md) · [部署指南](docs/reference/deployment.md) · [配置参考](docs/reference/configuration.md) |
+| 面试与简历 | [面试讲解](docs/interview/interview.md) · [项目介绍](docs/interview/project-introduction.md) · [简历版描述](docs/interview/resume.md) · [为什么不用 Asynq/Celery](docs/interview/why-not-asynq-celery.md) · [为什么不用 MySQL 队列](docs/interview/why-not-mysql-queue.md) |
+| 修复记录 | [docs/fixes/](docs/fixes/) · [全量代码审查](docs/fixes/2026-04-14-optimization-analysis.md) |
+| 项目规划 | [TODO 清单](docs/TODO.md) |
 
 ## License
 

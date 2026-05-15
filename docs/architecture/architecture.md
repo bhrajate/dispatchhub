@@ -105,7 +105,7 @@ SubmitTask, GetTask, ListTasks, CancelTask, GetQueueStats, CreateCronJob, GetCro
 
 - **TaskServiceImpl** (`internal/apiserver/domain/service/task_service_impl.go`): 实现 `TaskService` 接口，包含 Task CRUD 和 CronJob CRUD
 - **BeforeSubmit hook**: 在 `cmd/apiserver/main.go` 中注入，用于令牌桶限流 (`pkg/ratelimit`)
-- **RouteValidator** (`internal/apiserver/domain/service/route_validator.go`): 校验 queue+type 组合是否有在线 Worker 可处理，防止任务投递到无法处理的队列（[详见修复文档](2026-04-17-queue-type-route-validation.md)）
+- **RouteValidator** (`internal/apiserver/domain/service/route_validator.go`): 校验 queue+type 组合是否有在线 Worker 可处理，防止任务投递到无法处理的队列（[详见修复文档](../fixes/2026-04-17-queue-type-route-validation.md)）
 - **AfterSubmit hook**: 在 `cmd/apiserver/main.go` 中注入，用于 Prometheus 指标递增和日志记录
 - **readyz 健康检查**: 通过 `HealthChecker` 回调检查 Redis Ping + MySQL Ping，3s 超时
 - **HTTP 错误处理**: 内部错误记录详细日志 (`log.Errorf`)，对客户端返回通用错误消息 ("failed to submit task")
@@ -484,7 +484,7 @@ Scheduler.compensateLoop() (每 30s 执行)
 
 ### 为什么 API Server 对 etcd 是只读轻量依赖?
 
-API Server 连接 etcd 仅用于 RouteValidator 读取 Worker 拓扑（`ListWorkers`），校验 queue+type 路由可行性。这是只读、带缓存（10s 刷新）、fail-open 的轻量依赖——etcd 不可用时任务提交仍然正常工作。API Server 不使用 etcd 的 Watch/Lease/Campaign，不参与选举。详见 [queue-type 路由校验文档](2026-04-17-queue-type-route-validation.md)。
+API Server 连接 etcd 仅用于 RouteValidator 读取 Worker 拓扑（`ListWorkers`），校验 queue+type 路由可行性。这是只读、带缓存（10s 刷新）、fail-open 的轻量依赖——etcd 不可用时任务提交仍然正常工作。API Server 不使用 etcd 的 Watch/Lease/Campaign，不参与选举。详见 [queue-type 路由校验文档](../fixes/2026-04-17-queue-type-route-validation.md)。
 
 ### 为什么 Worker 使用拉模型 (Pull) 而非推模型 (Push)?
 

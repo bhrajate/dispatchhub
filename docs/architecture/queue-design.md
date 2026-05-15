@@ -242,7 +242,7 @@ RouteValidator: email-queue 上无 Worker 注册 "video.transcode" Handler
 拒绝: "no worker on queue "email-queue" handles task type "video.transcode""
 ```
 
-RouteValidator 从 etcd 读取 Worker 拓扑（WorkerInfo.Queues + WorkerInfo.TaskTypes），构建 `queue → {types}` 映射。采用 fail-open 策略：无 Worker 在线或缓存刷新失败时放行，不阻塞提交。详见 [路由校验修复文档](2026-04-17-queue-type-route-validation.md)。
+RouteValidator 从 etcd 读取 Worker 拓扑（WorkerInfo.Queues + WorkerInfo.TaskTypes），构建 `queue → {types}` 映射。采用 fail-open 策略：无 Worker 在线或缓存刷新失败时放行，不阻塞提交。详见 [路由校验修复文档](../fixes/2026-04-17-queue-type-route-validation.md)。
 
 ### 队列统计
 
