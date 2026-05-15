@@ -30,3 +30,12 @@ log:
   level: info
   format: json
   output: stdout
+
+# Per-queue token-bucket limiter applied at SubmitTask. Set enabled=false (or
+# default_rate=0) to disable entirely. Per-queue overrides are optional.
+rate_limit:
+  enabled: true
+  default_rate: 1000
+  default_burst: 1000
+  # per_queue:
+  #   high-priority: { rate: 5000, burst: 5000 }

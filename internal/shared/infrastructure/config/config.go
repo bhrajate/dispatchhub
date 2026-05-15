@@ -57,6 +57,24 @@ type LogConfig struct {
 	Output string `yaml:"output"`
 }
 
+type RateLimitConfig struct {
+	Enabled      bool                          `yaml:"enabled"`
+	DefaultRate  float64                       `yaml:"default_rate"`
+	DefaultBurst int                           `yaml:"default_burst"`
+	PerQueue     map[string]QueueRateLimitSpec `yaml:"per_queue"`
+}
+
+type QueueRateLimitSpec struct {
+	Rate  float64 `yaml:"rate"`
+	Burst int     `yaml:"burst"`
+}
+
+// Active reports whether the limiter should be wired in. A zero rate means
+// "no limit" — callers should skip building the limiter entirely.
+func (c RateLimitConfig) Active() bool {
+	return c.Enabled && c.DefaultRate > 0 && c.DefaultBurst > 0
+}
+
 // Shared defaults for infrastructure configs.
 
 func DefaultEtcdConfig() EtcdConfig {
@@ -99,6 +117,14 @@ func DefaultLogConfig() LogConfig {
 		Level:  "info",
 		Format: "json",
 		Output: "stdout",
+	}
+}
+
+func DefaultRateLimitConfig() RateLimitConfig {
+	return RateLimitConfig{
+		Enabled:      true,
+		DefaultRate:  1000,
+		DefaultBurst: 1000,
 	}
 }
 

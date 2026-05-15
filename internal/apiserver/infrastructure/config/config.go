@@ -5,12 +5,13 @@ import (
 )
 
 type Config struct {
-	Server  sharedcfg.ServerConfig  `yaml:"server"`
-	Etcd    sharedcfg.EtcdConfig    `yaml:"etcd"`
-	Redis   sharedcfg.RedisConfig   `yaml:"redis"`
-	MySQL   sharedcfg.MySQLConfig   `yaml:"mysql"`
-	Metrics sharedcfg.MetricsConfig `yaml:"metrics"`
-	Log     sharedcfg.LogConfig     `yaml:"log"`
+	Server    sharedcfg.ServerConfig    `yaml:"server"`
+	Etcd      sharedcfg.EtcdConfig      `yaml:"etcd"`
+	Redis     sharedcfg.RedisConfig     `yaml:"redis"`
+	MySQL     sharedcfg.MySQLConfig     `yaml:"mysql"`
+	Metrics   sharedcfg.MetricsConfig   `yaml:"metrics"`
+	Log       sharedcfg.LogConfig       `yaml:"log"`
+	RateLimit sharedcfg.RateLimitConfig `yaml:"rate_limit"`
 }
 
 func Default() *Config {
@@ -19,11 +20,12 @@ func Default() *Config {
 			GRPCAddr: ":9090",
 			HTTPAddr: ":8080",
 		},
-		Etcd:    sharedcfg.DefaultEtcdConfig(),
-		Redis:   sharedcfg.DefaultRedisConfig(),
-		MySQL:   sharedcfg.DefaultMySQLConfig(),
-		Metrics: sharedcfg.DefaultMetricsConfig(),
-		Log:     sharedcfg.DefaultLogConfig(),
+		Etcd:      sharedcfg.DefaultEtcdConfig(),
+		Redis:     sharedcfg.DefaultRedisConfig(),
+		MySQL:     sharedcfg.DefaultMySQLConfig(),
+		Metrics:   sharedcfg.DefaultMetricsConfig(),
+		Log:       sharedcfg.DefaultLogConfig(),
+		RateLimit: sharedcfg.DefaultRateLimitConfig(),
 	}
 }
 

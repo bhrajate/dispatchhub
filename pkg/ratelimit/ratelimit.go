@@ -2,9 +2,28 @@ package ratelimit
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"sync"
 	"time"
 )
+
+// ErrRateLimited is the sentinel returned when a queue exceeds its limit.
+// Wrap it with fmt.Errorf("...: %w", ErrRateLimited) to attach context;
+// transport layers can use errors.Is to map it to 429 / ResourceExhausted.
+var ErrRateLimited = errors.New("rate limit exceeded")
+
+// QueueLimitExceededError carries which queue tripped the limiter while still
+// satisfying errors.Is(err, ErrRateLimited).
+type QueueLimitExceededError struct {
+	Queue string
+}
+
+func (e *QueueLimitExceededError) Error() string {
+	return fmt.Sprintf("queue %q rate limit exceeded", e.Queue)
+}
+
+func (e *QueueLimitExceededError) Unwrap() error { return ErrRateLimited }
 
 // Limiter implements a sliding-window rate limiter with token bucket semantics.
 type Limiter struct {

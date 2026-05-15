@@ -88,13 +88,22 @@ func main() {
 	taskSvc := apisvc.NewTaskServiceImpl(broker, taskRepo, cronRepo)
 	taskSvc.SetRouteValidator(apisvc.NewRouteValidator(registry, 10*time.Second))
 
-	limiter := ratelimit.NewMultiQueueLimiter(1000, 1000)
-	taskSvc.SetBeforeSubmit(func(task *entity.Task) error {
-		if !limiter.Allow(task.QueueName) {
-			return fmt.Errorf("queue %s rate limit exceeded", task.QueueName)
+	if cfg.RateLimit.Active() {
+		limiter := ratelimit.NewMultiQueueLimiter(cfg.RateLimit.DefaultRate, cfg.RateLimit.DefaultBurst)
+		for queue, spec := range cfg.RateLimit.PerQueue {
+			limiter.SetRate(queue, spec.Rate, spec.Burst)
 		}
-		return nil
-	})
+		log.Infof("rate limiter enabled: default=%.0f/s burst=%d per_queue=%d",
+			cfg.RateLimit.DefaultRate, cfg.RateLimit.DefaultBurst, len(cfg.RateLimit.PerQueue))
+		taskSvc.SetBeforeSubmit(func(task *entity.Task) error {
+			if !limiter.Allow(task.QueueName) {
+				return &ratelimit.QueueLimitExceededError{Queue: task.QueueName}
+			}
+			return nil
+		})
+	} else {
+		log.Info("rate limiter disabled by config")
+	}
 
 	taskSvc.SetAfterSubmit(func(task *entity.Task) {
 		metrics.TasksSubmitted.WithLabelValues(
