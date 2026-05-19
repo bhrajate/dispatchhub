@@ -17,9 +17,13 @@ redis:
 
 mysql:
   dsn: "root:@tcp(localhost:3306)/dispatchhub?charset=utf8mb4&parseTime=true&loc=Local"
+  # Pool sized so idle == open to avoid database/sql connection churn under
+  # bursty load. ConnMaxIdleTime should be < server-side wait_timeout (default
+  # 28800s on MySQL 8) so the client closes idle conns before MySQL drops them.
   max_open_conns: 50
-  max_idle_conns: 10
+  max_idle_conns: 50
   conn_max_lifetime: 1h
+  conn_max_idle_time: 5m
 
 metrics:
   enabled: true

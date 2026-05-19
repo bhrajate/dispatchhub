@@ -17,9 +17,13 @@ redis:
 
 mysql:
   dsn: "root:@tcp(localhost:33307)/dispatchhub?charset=utf8mb4&parseTime=true&loc=Local"
+  # Pool sized so idle == open: avoids the database/sql connection churn that
+  # surfaced as "driver: bad connection" at 300 RPS in r1, where idle conns
+  # above max_idle_conns were closed and rebuilt under load.
   max_open_conns: 50
-  max_idle_conns: 10
+  max_idle_conns: 50
   conn_max_lifetime: 1h
+  conn_max_idle_time: 5m
 
 metrics:
   enabled: true

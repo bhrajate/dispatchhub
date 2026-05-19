@@ -36,8 +36,16 @@ func NewRedisClient(cfg config.RedisConfig) goredis.UniversalClient {
 }
 
 // NewMySQLDB creates a GORM DB instance with connection pool tuning from config.
+//
+// SkipDefaultTransaction is enabled because every Create/Update/Delete in this
+// codebase is a single-statement operation that doesn't need GORM's implicit
+// BEGIN/COMMIT wrapping. The wrapping costs two extra round-trips per write
+// and was the dominant CPU consumer on the API Server write path (~39% of
+// SubmitTask time per CPU profile, 2026-05-19).
 func NewMySQLDB(cfg config.MySQLConfig) (*gorm.DB, error) {
-	db, err := gorm.Open(mysql.Open(cfg.DSN), &gorm.Config{})
+	db, err := gorm.Open(mysql.Open(cfg.DSN), &gorm.Config{
+		SkipDefaultTransaction: true,
+	})
 	if err != nil {
 		return nil, fmt.Errorf("connect mysql: %w", err)
 	}
@@ -48,6 +56,9 @@ func NewMySQLDB(cfg config.MySQLConfig) (*gorm.DB, error) {
 	sqlDB.SetMaxOpenConns(cfg.MaxOpenConns)
 	sqlDB.SetMaxIdleConns(cfg.MaxIdleConns)
 	sqlDB.SetConnMaxLifetime(cfg.ConnMaxLifetime)
+	if cfg.ConnMaxIdleTime > 0 {
+		sqlDB.SetConnMaxIdleTime(cfg.ConnMaxIdleTime)
+	}
 	return db, nil
 }
 

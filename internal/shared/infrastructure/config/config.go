@@ -43,6 +43,11 @@ type MySQLConfig struct {
 	MaxOpenConns    int           `yaml:"max_open_conns"`
 	MaxIdleConns    int           `yaml:"max_idle_conns"`
 	ConnMaxLifetime time.Duration `yaml:"conn_max_lifetime"`
+	// ConnMaxIdleTime caps how long an idle connection may live before being
+	// closed. Optional — zero (default) keeps idle connections forever, which
+	// can leave middleboxes / MySQL itself with stale TCP state. Recommended
+	// 5-30 minutes in production, shorter than wait_timeout on the server.
+	ConnMaxIdleTime time.Duration `yaml:"conn_max_idle_time"`
 }
 
 type MetricsConfig struct {
