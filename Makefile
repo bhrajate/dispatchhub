@@ -78,6 +78,26 @@ run-worker:
 run-apiserver:
 	go run ./cmd/apiserver --config=config/apiserver.yaml
 
+## Run baseline performance benchmark suite (open-model RPS, wrk2 + ghz)
+bench:
+	bash test/perf/run.sh
+
+## Install perf benchmark tooling (wrk2 + ghz)
+bench-deps:
+	@command -v wrk2 >/dev/null || { \
+		echo "wrk2 not found. Build from source:"; \
+		echo "  sudo apt-get install -y build-essential libssl-dev zlib1g-dev"; \
+		echo "  git clone https://github.com/giltene/wrk2.git /tmp/wrk2 && \\"; \
+		echo "    make -C /tmp/wrk2 && sudo install /tmp/wrk2/wrk /usr/local/bin/wrk2"; \
+		exit 1; \
+	}
+	go install github.com/bojand/ghz/cmd/ghz@latest
+
+## Capture environment metadata only
+bench-env:
+	bash test/perf/env/capture-server.sh
+	bash test/perf/env/capture-client.sh
+
 ## Tidy dependencies
 tidy:
 	go mod tidy

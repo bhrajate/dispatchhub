@@ -1,0 +1,11 @@
+{
+  "spec": {
+    "name": "bench",
+    "namespace": "perf",
+    "type": "example.echo",
+    "queue_name": "default",
+    "priority": "TASK_PRIORITY_DEFAULT",
+    "payload": "eyJoZWxsbyI6IndvcmxkIn0=",
+    "timeout": "30s"
+  }
+}

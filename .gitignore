@@ -4,3 +4,8 @@ coverage.out
 .idea/
 .vscode/
 *.swp
+**/__pycache__
+
+# Perf benchmark raw artefacts; the dated dirs hold per-run apiserver.log,
+# k6 summaries, env captures, etc. Kept locally, regenerated on each run.
+test/perf/results/

@@ -15,6 +15,11 @@ import (
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 )
 
+// registerPprofHooks is wired by pprof.go (build tag `pprof`) and by
+// pprof_off.go (default). Keeping it as a package var lets us flip pprof
+// on with a build tag without leaving handlers exposed in production.
+var registerPprofHooks func(*http.ServeMux)
+
 // HealthChecker is called by the readyz endpoint to verify dependencies.
 // Returns nil if healthy, or an error describing the unhealthy component.
 type HealthChecker func(ctx context.Context) error
@@ -58,6 +63,8 @@ func NewServer(taskSvc apisvc.TaskService, addr string, healthCheck HealthChecke
 	mux.Handle("GET /metrics", promhttp.Handler())
 	mux.HandleFunc("GET /healthz", s.handleHealthz)
 	mux.HandleFunc("GET /readyz", s.handleReadyz)
+
+	registerPprofHooks(mux)
 
 	return s
 }
