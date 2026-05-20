@@ -1,7 +1,6 @@
 # Playbooks
 
-可复用的工程经验沉淀。每份 playbook 是一类**反复出现的问题**的标准操作流程：
-工具、判断准则、避坑清单，**与具体事件无关**。
+可复用的工程经验沉淀。每份 playbook 是一类**反复出现的问题**的标准操作流程：工具、判断准则、避坑清单，**与具体事件无关**。
 
 写作约定：
 - **场景中性**：不假设特定 endpoint / 特定 commit / 特定时间点。
@@ -9,8 +8,7 @@
 - **附真实案例**：每份 playbook 链一个验证过它的 postmortem，证明流程不是空想。
 - **避免与代码同步腐化**：playbook 引用的命令、工具、目录路径在改动时一并更新。
 
-事件级"故事"（postmortem / RCA / baseline 报告）放各自主题目录的 `reports/` 或同级，
-不要放进 playbooks。两类文档相互交叉引用：playbook 抽象 + postmortem 具体。
+事件级"故事"（postmortem / RCA / baseline 报告）放各自主题目录的 `reports/` 或同级，不要放进 playbooks。两类文档相互交叉引用：playbook 抽象 + postmortem 具体。
 
 ## 目录
 

@@ -16,6 +16,7 @@
 #   APISERVER_CONFIG         default test/perf/configs/apiserver.yaml
 #   SKIP_RESTART=1           reuse a running apiserver, don't start one
 #   DURATION                 default 60s
+#   CONNECTIONS              default 1 (ghz --connections; wrk2 uses CONCURRENCY as -c)
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
@@ -51,7 +52,13 @@ case "$MATRIX" in
     smoke) RPS_LIST=(100) ; ENDPOINT_ORDER=(http_submit_task) ;;
     trim)  RPS_LIST=(100 300 600 1000) ;;
     full)  RPS_LIST=(100 300 600 1000 2000 5000) ;;
-    *)     echo "MATRIX must be smoke|trim|full" >&2; exit 2 ;;
+    custom)
+        if [[ -z "${CUSTOM_RPS:-}" ]]; then
+            echo "MATRIX=custom requires CUSTOM_RPS env var (space-separated)" >&2; exit 2
+        fi
+        read -ra RPS_LIST <<< "$CUSTOM_RPS"
+        ;;
+    *)     echo "MATRIX must be smoke|trim|full|custom" >&2; exit 2 ;;
 esac
 
 # --- 1. capture env -----------------------------------------------------------
@@ -203,6 +210,7 @@ for endpoint in "${ENDPOINT_ORDER[@]}"; do
         RPS="$rps" \
         DURATION="$DURATION" \
         CONCURRENCY="$conc" \
+        CONNECTIONS="${CONNECTIONS:-1}" \
         BASE_URL="$DIRECT_HTTP" \
         GRPC_ADDR="$DIRECT_GRPC" \
         OUT_DIR="$cell_dir" \

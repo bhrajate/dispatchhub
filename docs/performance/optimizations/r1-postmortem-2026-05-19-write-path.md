@@ -1,9 +1,7 @@
 # Postmortem：2026-05-19 写路径吞吐瓶颈
 
-> **TL;DR**：API Server 写路径在 ~300 RPS 撞顶。CPU profile 显示瓶颈是 GORM
-> 给单条 `Create()` 默认包的 `BEGIN`+`COMMIT`，占 SubmitTask 总耗时 **39%**。
-> 一行 `SkipDefaultTransaction: true` 让 600 RPS 阶梯实际 RPS **+51%**、
-> 100 RPS 阶梯 p99 **−73%**。
+> **TL;DR**：API Server 写路径在 ~300 RPS 撞顶。CPU profile 显示瓶颈是 GORM 给单条 `Create()` 默认包的 `BEGIN`+`COMMIT`，占 SubmitTask 总耗时 **39%**。
+> 一行 `SkipDefaultTransaction: true` 让 600 RPS 阶梯实际 RPS **+51%**、 100 RPS 阶梯 p99 **−73%**。
 >
 > **更值得复盘的不是修复**，而是过程里推翻的两个错误假设：
 > 1. "vegeta vs wrk2 RPS 差异是 idempotency 缓存命中差" —— 代码里根本没有缓存。

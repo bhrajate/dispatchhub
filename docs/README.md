@@ -30,6 +30,7 @@
 | [简历版描述](interview/resume.md) | 精简 / 标准 / 详细三档简历模板 |
 | [为什么不用 Asynq / Celery](interview/why-not-asynq-celery.md) | 竞品对比与差异化价值 |
 | [为什么不用 MySQL 队列](interview/why-not-mysql-queue.md) | FOR UPDATE 锁机制深度分析 |
+| [面试 Q&A 库](interview/qa/) | **简历亮点逐条问答库**（7 篇分主题文档，覆盖架构 / 队列 / 选举与一致性 / Worker 数据面 / 延迟与路由 / 反思权衡） |
 
 ## 修复记录 — `fixes/`
 
