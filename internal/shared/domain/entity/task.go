@@ -7,18 +7,18 @@ import (
 	"time"
 )
 
-// TaskState represents the lifecycle state of a task.
+// TaskState 表示任务的生命周期状态。
 type TaskState int
 
 const (
-	TaskStatePending   TaskState = iota // waiting to be scheduled
-	TaskStateScheduled                  // assigned to a worker
-	TaskStateRunning                    // actively executing
-	TaskStateRetrying                   // waiting for retry
-	TaskStateCompleted                  // finished successfully
-	TaskStateFailed                     // exhausted all retries
-	TaskStateCancelled                  // cancelled by user
-	TaskStateTimeout                    // timed out
+	TaskStatePending   TaskState = iota // 等待调度
+	TaskStateScheduled                  // 已分配给 worker
+	TaskStateRunning                    // 正在执行
+	TaskStateRetrying                   // 等待重试
+	TaskStateCompleted                  // 成功完成
+	TaskStateFailed                     // 重试次数已耗尽
+	TaskStateCancelled                  // 已被用户取消
+	TaskStateTimeout                    // 已超时
 )
 
 var taskStateNames = map[TaskState]string{
@@ -39,7 +39,7 @@ func (s TaskState) String() string {
 	return "unknown"
 }
 
-// TaskPriority defines scheduling priority levels.
+// TaskPriority 定义调度优先级。
 type TaskPriority int
 
 const (
@@ -49,38 +49,38 @@ const (
 	PriorityCritical TaskPriority = 10
 )
 
-// Task is the fundamental unit of work in the scheduling system.
+// Task 是调度系统中的基本工作单元。
 type Task struct {
-	// Identity
+	// 身份信息
 	ID        string `json:"id" gorm:"primaryKey;size:64"`
 	Name      string `json:"name" gorm:"index;size:255"`
 	Namespace string `json:"namespace" gorm:"index;size:128"`
 	Group     string `json:"group" gorm:"index;size:128"`
 
-	// Payload
+	// 负载
 	Type    string          `json:"type" gorm:"index;size:128"`
 	Payload json.RawMessage `json:"payload" gorm:"type:text"`
 	Labels  Labels          `json:"labels" gorm:"type:text"`
 
-	// Scheduling
+	// 调度
 	Priority   TaskPriority `json:"priority" gorm:"index"`
 	Delay      Duration     `json:"delay,omitempty"`
 	ScheduleAt *time.Time   `json:"schedule_at,omitempty"`
 	Timeout    Duration     `json:"timeout"`
 
-	// Retry policy
+	// 重试策略
 	MaxRetries   int      `json:"max_retries"`
 	RetryCount   int      `json:"retry_count"`
 	RetryBackoff Duration `json:"retry_backoff"`
 
-	// State
+	// 状态
 	State     TaskState `json:"state" gorm:"index"`
 	Result    string    `json:"result,omitempty" gorm:"type:text"`
 	Error     string    `json:"error,omitempty" gorm:"type:text"`
 	WorkerID  string    `json:"worker_id,omitempty" gorm:"index;size:128"`
 	QueueName string    `json:"queue_name" gorm:"index;size:128"`
 
-	// Metadata
+	// 元数据
 	CreatedAt  time.Time  `json:"created_at" gorm:"autoCreateTime"`
 	UpdatedAt  time.Time  `json:"updated_at" gorm:"autoUpdateTime"`
 	StartedAt  *time.Time `json:"started_at,omitempty"`
@@ -88,7 +88,7 @@ type Task struct {
 	Version    int64      `json:"version" gorm:"default:1"`
 }
 
-// IsTerminal returns true if the task is in a terminal state.
+// IsTerminal 判断任务是否处于终态。
 func (t *Task) IsTerminal() bool {
 	switch t.State {
 	case TaskStateCompleted, TaskStateFailed, TaskStateCancelled, TaskStateTimeout:
@@ -97,15 +97,15 @@ func (t *Task) IsTerminal() bool {
 	return false
 }
 
-// CanRetry checks whether the task is eligible for a retry.
+// CanRetry 检查任务是否仍可重试。
 func (t *Task) CanRetry() bool {
 	return t.RetryCount < t.MaxRetries && !t.IsTerminal()
 }
 
-// Labels is a set of key-value pairs attached to a task (k8s-style).
+// Labels 是挂载到任务上的键值对集合（k8s 风格）。
 type Labels map[string]string
 
-// Value implements driver.Valuer for GORM MySQL serialization.
+// Value 为 GORM MySQL 序列化实现 driver.Valuer。
 func (l Labels) Value() (driver.Value, error) {
 	if l == nil {
 		return nil, nil
@@ -117,7 +117,7 @@ func (l Labels) Value() (driver.Value, error) {
 	return string(data), nil
 }
 
-// Scan implements sql.Scanner for GORM MySQL deserialization.
+// Scan 为 GORM MySQL 反序列化实现 sql.Scanner。
 func (l *Labels) Scan(value any) error {
 	if value == nil {
 		*l = nil
@@ -135,7 +135,7 @@ func (l *Labels) Scan(value any) error {
 	return json.Unmarshal(bytes, l)
 }
 
-// Duration wraps time.Duration for JSON and GORM serialization.
+// Duration 封装 time.Duration，用于 JSON 和 GORM 序列化。
 type Duration struct {
 	time.Duration
 }
@@ -157,12 +157,12 @@ func (d *Duration) UnmarshalJSON(b []byte) error {
 	return nil
 }
 
-// Value implements driver.Valuer for GORM MySQL serialization (stores as nanoseconds).
+// Value 为 GORM MySQL 序列化实现 driver.Valuer（按纳秒存储）。
 func (d Duration) Value() (driver.Value, error) {
 	return int64(d.Duration), nil
 }
 
-// Scan implements sql.Scanner for GORM MySQL deserialization (reads nanoseconds).
+// Scan 为 GORM MySQL 反序列化实现 sql.Scanner（按纳秒读取）。
 func (d *Duration) Scan(value any) error {
 	if value == nil {
 		d.Duration = 0
@@ -183,7 +183,7 @@ func (d *Duration) Scan(value any) error {
 	return nil
 }
 
-// TaskFilter defines criteria for querying tasks.
+// TaskFilter 定义任务查询条件。
 type TaskFilter struct {
 	Namespace string            `json:"namespace,omitempty"`
 	Group     string            `json:"group,omitempty"`
@@ -196,13 +196,13 @@ type TaskFilter struct {
 	Offset    int               `json:"offset,omitempty"`
 }
 
-// TaskResult is returned after a handler processes a task.
+// TaskResult 是 handler 处理任务后的返回结果。
 type TaskResult struct {
 	Output string `json:"output,omitempty"`
 	Error  error  `json:"-"`
 }
 
-// ErrPanic wraps a recovered panic value into an error.
+// ErrPanic 将 recover 到的 panic 值包装为 error。
 func ErrPanic(v any) error {
 	return fmt.Errorf("panic: %v", v)
 }

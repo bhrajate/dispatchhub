@@ -17,9 +17,9 @@ redis:
 
 mysql:
   dsn: "root:@tcp(localhost:3306)/dispatchhub?charset=utf8mb4&parseTime=true&loc=Local"
-  # Pool sized so idle == open to avoid database/sql connection churn under
-  # bursty load. ConnMaxIdleTime should be < server-side wait_timeout (default
-  # 28800s on MySQL 8) so the client closes idle conns before MySQL drops them.
+  # 连接池设置为 idle == open，避免突发负载下 database/sql 连接频繁创建和关闭。
+  # ConnMaxIdleTime 应小于服务端 wait_timeout（MySQL 8 默认 28800s），
+  # 使客户端先于 MySQL 主动关闭 idle connection。
   max_open_conns: 50
   max_idle_conns: 50
   conn_max_lifetime: 1h
@@ -35,8 +35,8 @@ log:
   format: json
   output: stdout
 
-# Per-queue token-bucket limiter applied at SubmitTask. Set enabled=false (or
-# default_rate=0) to disable entirely. Per-queue overrides are optional.
+# SubmitTask 使用按队列划分的 token-bucket limiter。设置 enabled=false
+# 或 default_rate=0 可完全禁用。按队列覆盖项为可选配置。
 rate_limit:
   enabled: true
   default_rate: 1000

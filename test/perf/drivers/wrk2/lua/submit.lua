@@ -1,6 +1,6 @@
--- wrk2 Lua for POST /api/v1/tasks: each request gets a unique `name` to
--- bypass any server-side idempotency cache. done() mirrors lua/done.lua so
--- run.sh eval_verdict sees the same summary.json schema as read-path cells.
+-- wrk2 Lua 脚本用于 POST /api/v1/tasks：每个请求都带唯一 `name`，
+-- 以绕过服务端可能存在的 idempotency cache。done() 与 lua/done.lua 保持一致，
+-- 使 run.sh eval_verdict 看到和读路径 cell 相同的 summary.json schema。
 
 local thread_seq = 0
 

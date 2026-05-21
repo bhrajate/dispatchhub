@@ -1,22 +1,22 @@
 #!/usr/bin/env bash
-# DispatchHub baseline perf orchestrator (open-model RPS, wrk2 + ghz).
+# DispatchHub 基线性能编排脚本（open-model RPS，wrk2 + ghz）。
 #
-# Pipeline:
-#   1. Capture server + client environment metadata.
-#   2. Start apiserver with test/perf/configs/apiserver.yaml (rate_limit already off,
-#      pointed at dh-perf-* containers on 16380/22379/33307).
-#   3. Seed one task ID via the apiserver HTTP port for read scripts.
-#   4. Loop endpoints × RPS:
-#        driver script (wrk2 or ghz) → metrics snapshot → verdict.
-#   5. Always: kill apiserver.
+# 流程：
+#   1. 采集 server 和 client 环境元数据。
+#   2. 使用 test/perf/configs/apiserver.yaml 启动 apiserver
+#      （rate_limit 已关闭，并指向 16380/22379/33307 上的 dh-perf-* 容器）。
+#   3. 通过 apiserver HTTP 端口种入一个 task ID，供读路径脚本使用。
+#   4. 遍历 endpoint × RPS：
+#        driver script（wrk2 或 ghz）→ metrics 快照 → verdict。
+#   5. 始终清理 apiserver。
 #
-# Env knobs:
-#   MATRIX=smoke|trim|full   default trim
-#   APISERVER_BIN            default ./bin/apiserver
-#   APISERVER_CONFIG         default test/perf/configs/apiserver.yaml
-#   SKIP_RESTART=1           reuse a running apiserver, don't start one
-#   DURATION                 default 60s
-#   CONNECTIONS              default 1 (ghz --connections; wrk2 uses CONCURRENCY as -c)
+# 环境变量：
+#   MATRIX=smoke|trim|full   默认 trim
+#   APISERVER_BIN            默认 ./bin/apiserver
+#   APISERVER_CONFIG         默认 test/perf/configs/apiserver.yaml
+#   SKIP_RESTART=1           复用正在运行的 apiserver，不重新启动
+#   DURATION                 默认 60s
+#   CONNECTIONS              默认 1 (ghz --connections; wrk2 uses CONCURRENCY as -c)
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
@@ -35,7 +35,7 @@ APISERVER_BIN="${APISERVER_BIN:-./bin/apiserver}"
 APISERVER_CONFIG="${APISERVER_CONFIG:-test/perf/configs/apiserver.yaml}"
 PROTO_ROOT="$ROOT/api/proto"
 
-# Direct loopback endpoints — drivers talk straight to apiserver.
+# 直接 loopback endpoint，driver 直接访问 apiserver。
 DIRECT_HTTP="http://127.0.0.1:8080"
 DIRECT_GRPC="127.0.0.1:9090"
 
@@ -61,12 +61,12 @@ case "$MATRIX" in
     *)     echo "MATRIX must be smoke|trim|full|custom" >&2; exit 2 ;;
 esac
 
-# --- 1. capture env -----------------------------------------------------------
+# --- 1. 采集环境 --------------------------------------------------------------
 LOG "capturing env metadata"
 bash test/perf/env/capture-server.sh "$RESULT_DIR/env-server.txt"
 bash test/perf/env/capture-client.sh "$RESULT_DIR/env-client.txt"
 
-# --- 2. start apiserver -------------------------------------------------------
+# --- 2. 启动 apiserver --------------------------------------------------------
 APISERVER_PID=""
 
 cleanup() {
@@ -101,32 +101,32 @@ if [[ -z "${SKIP_RESTART:-}" ]]; then
     done
 fi
 
-# Confirm rate-limiter actually disabled (defensive — config says enabled:false).
+# 确认 rate-limiter 实际已禁用（防御性检查，配置中 enabled:false）。
 if [[ -f "$RESULT_DIR/apiserver.log" ]] \
    && ! grep -q "rate limiter disabled by config" "$RESULT_DIR/apiserver.log"; then
     LOG "WARNING: apiserver did not log 'rate limiter disabled by config'"
 fi
 
-# --- 3. seed read-path task ---------------------------------------------------
+# --- 3. 种入读路径任务 ---------------------------------------------------------
 LOG "seeding read-path task"
 BASE_URL="$DIRECT_HTTP" bash test/perf/env/seed-task.sh "$RESULT_DIR"
 # shellcheck disable=SC1091
 source "$RESULT_DIR/seed.env"
 export SEED_TASK_ID SEED_QUEUE SEED_TYPE
 
-# --- 4. matrix ----------------------------------------------------------------
+# --- 4. matrix ---------------------------------------------------------------
 RESULT_INDEX="$RESULT_DIR/index.csv"
 echo "endpoint,rps_target,rps_actual,p50_ms,p95_ms,p99_ms,errors,verdict" > "$RESULT_INDEX"
 
 snapshot_metrics() {
     local out="$1"
-    # apiserver mounts /metrics on the HTTP server (:8080), not on a separate port.
+    # apiserver 将 /metrics 挂在 HTTP server（:8080）上，而不是单独端口。
     curl -fsS http://127.0.0.1:8080/metrics > "$out" 2>/dev/null || true
 }
 
-# Read process_cpu_seconds_total (Prometheus counter, in seconds) from /metrics.
-# Echoes "<seconds> <wallclock_ns>" so the caller can diff two samples and
-# compute mean CPU% over the cell window without depending on `pidstat`.
+# 从 /metrics 读取 process_cpu_seconds_total（Prometheus counter，单位秒）。
+# 输出 "<seconds> <wallclock_ns>"，调用方可对两次采样做差，
+# 在不依赖 `pidstat` 的情况下计算 cell 窗口内的平均 CPU%。
 sample_cpu_marker() {
     local cpu wall
     cpu=$(curl -fsS http://127.0.0.1:8080/metrics 2>/dev/null \
@@ -150,11 +150,11 @@ except Exception:
     sys.exit(0)
 
 if endpoint.startswith("grpc"):
-    # ghz JSON: rps, count, average (ns), latencyDistribution = [{percentage, latency(ns)}, ...]
+    # ghz JSON：rps、count、average（ns）、latencyDistribution = [{percentage, latency(ns)}, ...]
     actual = float(d.get("rps", 0) or 0)
     count = int(d.get("count", 0) or 0)
     err_count = sum((d.get("errorDistribution") or {}).values()) if isinstance(d.get("errorDistribution"), dict) else 0
-    # statusCodeDistribution: map status → count, OK == success.
+    # statusCodeDistribution：status → count 的 map，OK 表示成功。
     sc = d.get("statusCodeDistribution") or {}
     if sc:
         ok = int(sc.get("OK", 0) or 0)
@@ -163,17 +163,17 @@ if endpoint.startswith("grpc"):
     err_rate = (err_count / count) if count else 1.0
     p = {item.get("percentage"): item.get("latency", 0) for item in (d.get("latencyDistribution") or [])}
     def pct(target_pct, fallback_keys=()):
-        # ghz emits common percentiles (50, 75, 90, 95, 99); pick exact, else nearest available.
+        # ghz 输出常见百分位（50、75、90、95、99）；优先精确匹配，否则取最近可用值。
         if target_pct in p:
             return p[target_pct] / 1e6
-        # fallback: scan numeric keys
+        # fallback：扫描数值 key
         candidates = [(abs(k - target_pct), p[k]) for k in p if isinstance(k, (int, float))]
         return (min(candidates)[1] / 1e6) if candidates else 0.0
     p50, p95, p99 = pct(50), pct(95), pct(99)
 else:
-    # wrk2 JSON (emitted by drivers/wrk2/lua/{done,submit}.lua):
-    #   throughput (req/s), requests, non2xx (status>=400 + socket errs),
-    #   p50_ms / p95_ms / p99_ms (already in ms; converted from HdrHistogram μs).
+    # wrk2 JSON（由 drivers/wrk2/lua/{done,submit}.lua 输出）：
+    #   throughput（req/s）、requests、non2xx（status>=400 + socket error）、
+    #   p50_ms / p95_ms / p99_ms（已为 ms，由 HdrHistogram μs 转换而来）。
     actual = float(d.get("throughput", 0) or 0)
     requests = int(d.get("requests", 0) or 0)
     non2xx = int(d.get("non2xx", 0) or 0)
@@ -199,14 +199,14 @@ for endpoint in "${ENDPOINT_ORDER[@]}"; do
 
         LOG "→ $cell (rps=$rps conc=$conc dur=$DURATION)"
 
-        # Mean CPU% over the cell window via process_cpu_seconds_total diff.
-        # Captured before/after the driver run so it reflects the actual load
-        # window without needing `pidstat` (which is not always installed).
+        # 通过 process_cpu_seconds_total 差分计算 cell 窗口内的平均 CPU%。
+        # 在 driver 运行前后采集，使其反映真实负载窗口，
+        # 且不需要 `pidstat`（它不一定已安装）。
         sample_cpu_marker > "$cell_dir/cpu-start.txt" || true
 
-        # GOMAXPROCS caps the Go ghz driver's OS thread count; GODEBUG=netdns=go
-        # disables the cgo resolver so ghz doesn't spawn pthreads for DNS under
-        # saturation. wrk2 ignores both and uses its own thread pool (-t).
+        # GOMAXPROCS 限制 Go ghz driver 的 OS thread 数；
+        # GODEBUG=netdns=go 禁用 cgo resolver，避免 ghz 在饱和时为 DNS 派生 pthread。
+        # wrk2 会忽略这两项，并使用自己的线程池（-t）。
         RPS="$rps" \
         DURATION="$DURATION" \
         CONCURRENCY="$conc" \

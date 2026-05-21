@@ -1,5 +1,5 @@
--- Common wrk2 done() hook: write a flat summary.json compatible with run.sh
--- eval_verdict (HTTP branch). Used for read-path GET drivers.
+-- 通用 wrk2 done() hook：写入扁平的 summary.json，
+-- 与 run.sh eval_verdict（HTTP 分支）兼容。用于读路径 GET driver。
 function done(summary, latency, requests)
     local out_dir = os.getenv("OUT_DIR")
     if not out_dir or out_dir == "" then

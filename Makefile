@@ -13,33 +13,33 @@ COMPONENTS := scheduler worker apiserver
 
 all: build
 
-## Build all components
+## 构建所有组件
 build: $(COMPONENTS)
 
 $(COMPONENTS):
 	@echo "Building $@..."
 	CGO_ENABLED=0 go build -ldflags "$(LDFLAGS)" -o bin/$@ ./cmd/$@
 
-## Run tests
+## 运行测试
 test:
 	go test -race -coverprofile=coverage.out ./...
 	go tool cover -func=coverage.out
 
-## Run tests with short flag (skip integration)
+## 使用 short flag 运行测试（跳过集成测试）
 test-unit:
 	go test -short -race ./...
 
-## Lint code
+## 检查代码
 lint:
 	golangci-lint run ./...
 
-## Generate protobuf code
+## 生成 protobuf 代码
 proto:
 	protoc --go_out=. --go_opt=paths=source_relative \
 		--go-grpc_out=. --go-grpc_opt=paths=source_relative \
 		api/proto/dispatch.proto
 
-## Build Docker images for all components
+## 为所有组件构建 Docker 镜像
 docker: $(addprefix docker-,$(COMPONENTS))
 
 docker-%:
@@ -52,23 +52,23 @@ docker-%:
 		-t $(REGISTRY)/$*:latest \
 		.
 
-## Push Docker images
+## 推送 Docker 镜像
 push: $(addprefix push-,$(COMPONENTS))
 
 push-%:
 	docker push $(REGISTRY)/$*:$(VERSION)
 	docker push $(REGISTRY)/$*:latest
 
-## Install Helm chart
+## 安装 Helm chart
 helm-install:
 	helm upgrade --install dispatchhub deploy/helm/dispatchhub \
 		--namespace dispatchhub --create-namespace
 
-## Template Helm chart (dry run)
+## 渲染 Helm chart（试运行）
 helm-template:
 	helm template dispatchhub deploy/helm/dispatchhub
 
-## Run locally (requires Redis, etcd, MySQL)
+## 本地运行（需要 Redis、etcd、MySQL）
 run-scheduler:
 	go run ./cmd/scheduler --config=config/scheduler.yaml
 
@@ -78,11 +78,11 @@ run-worker:
 run-apiserver:
 	go run ./cmd/apiserver --config=config/apiserver.yaml
 
-## Run baseline performance benchmark suite (open-model RPS, wrk2 + ghz)
+## 运行基线性能 benchmark 套件（open-model RPS，wrk2 + ghz）
 bench:
 	bash test/perf/run.sh
 
-## Install perf benchmark tooling (wrk2 + ghz)
+## 安装性能 benchmark 工具（wrk2 + ghz）
 bench-deps:
 	@command -v wrk2 >/dev/null || { \
 		echo "wrk2 not found. Build from source:"; \
@@ -93,20 +93,20 @@ bench-deps:
 	}
 	go install github.com/bojand/ghz/cmd/ghz@latest
 
-## Capture environment metadata only
+## 仅采集环境元数据
 bench-env:
 	bash test/perf/env/capture-server.sh
 	bash test/perf/env/capture-client.sh
 
-## Tidy dependencies
+## 整理依赖
 tidy:
 	go mod tidy
 
-## Clean build artifacts
+## 清理构建产物
 clean:
 	rm -rf bin/ coverage.out
 
-## Show help
+## 显示帮助
 help:
 	@echo "DispatchHub - Cloud-native Task Scheduling System"
 	@echo ""

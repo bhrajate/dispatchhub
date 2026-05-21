@@ -14,7 +14,7 @@ func init() {
 	defaultLogger = l.Sugar()
 }
 
-// Init initializes the global logger with the given level and format.
+// Init 使用给定 level 和 format 初始化全局 logger。
 func Init(level, format, output string) {
 	var lvl zapcore.Level
 	if err := lvl.UnmarshalText([]byte(level)); err != nil {

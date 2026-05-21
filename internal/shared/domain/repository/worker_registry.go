@@ -6,7 +6,7 @@ import (
 	"github.com/dispatchhub/dispatchhub/internal/shared/domain/entity"
 )
 
-// WorkerEventType represents the type of worker event.
+// WorkerEventType 表示 worker 事件类型。
 type WorkerEventType int
 
 const (
@@ -15,14 +15,14 @@ const (
 	WorkerEventUpdated
 )
 
-// WorkerEvent is emitted when a worker's registration changes.
+// WorkerEvent 在 worker 注册信息变更时发出。
 type WorkerEvent struct {
 	Type     WorkerEventType
 	WorkerID string
 	Worker   *entity.WorkerInfo
 }
 
-// WorkerRegistry manages worker registration and discovery.
+// WorkerRegistry 管理 worker 注册与发现。
 type WorkerRegistry interface {
 	Register(ctx context.Context, worker *entity.WorkerInfo) error
 	Deregister(ctx context.Context, workerID string) error

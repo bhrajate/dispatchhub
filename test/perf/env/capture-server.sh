@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# Capture server-side hardware / OS / dependency versions for the perf report header.
-# Usage: capture-server.sh [output_path]
+# 采集 server 侧硬件、OS 和依赖版本，用于性能报告头部。
+# 用法：capture-server.sh [output_path]
 set -euo pipefail
 
 OUT="${1:-test/perf/results/latest/env-server.txt}"

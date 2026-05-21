@@ -25,7 +25,7 @@ import (
 	"google.golang.org/protobuf/types/known/timestamppb"
 )
 
-// Server wraps a gRPC server implementing the DispatchService API.
+// Server 包装实现 DispatchService API 的 gRPC server。
 type Server struct {
 	dispatchpb.UnimplementedDispatchServiceServer
 	taskSvc apisvc.TaskService
@@ -33,7 +33,7 @@ type Server struct {
 	health  *health.Server
 }
 
-// NewServer creates a new gRPC server with the DispatchService registered.
+// NewServer 创建已注册 DispatchService 的新 gRPC server。
 func NewServer(taskSvc apisvc.TaskService) *Server {
 	recoveryOpts := []grpc_recovery.Option{
 		grpc_recovery.WithRecoveryHandler(func(p any) error {
@@ -97,7 +97,7 @@ func (s *Server) GracefulStop() {
 	s.server.GracefulStop()
 }
 
-// --- DispatchService implementation ---
+// --- DispatchService 实现 ---
 
 func (s *Server) SubmitTask(ctx context.Context, req *dispatchpb.SubmitTaskRequest) (*dispatchpb.SubmitTaskResponse, error) {
 	spec := req.GetSpec()
@@ -207,7 +207,7 @@ func (s *Server) GetQueueStats(ctx context.Context, req *dispatchpb.GetQueueStat
 	}, nil
 }
 
-// --- CronJob handlers ---
+// --- CronJob handler ---
 
 func (s *Server) CreateCronJob(ctx context.Context, req *dispatchpb.CreateCronJobRequest) (*dispatchpb.CreateCronJobResponse, error) {
 	if req.GetType() == "" || req.GetCronExpr() == "" {
@@ -233,7 +233,7 @@ func (s *Server) CreateCronJob(ctx context.Context, req *dispatchpb.CreateCronJo
 		job.RetryBackoff = entity.Duration{Duration: d.AsDuration()}
 	}
 
-	// Parse cron expression and compute initial next_run_at (infrastructure concern, not domain)
+	// 解析 cron expression 并计算初始 next_run_at（基础设施关注点，不属于领域层）
 	next, err := cronutil.NextRunTime(req.GetCronExpr(), time.Now())
 	if err != nil {
 		return nil, status.Errorf(codes.InvalidArgument, "invalid cron expression: %v", err)
@@ -276,7 +276,7 @@ func (s *Server) DeleteCronJob(ctx context.Context, req *dispatchpb.DeleteCronJo
 	return &dispatchpb.DeleteCronJobResponse{}, nil
 }
 
-// --- Conversion helpers ---
+// --- 转换辅助函数 ---
 
 func entityToProtoTask(t *entity.Task) *dispatchpb.Task {
 	pt := &dispatchpb.Task{
@@ -397,7 +397,7 @@ func entityToProtoCronJob(j *entity.CronJob) *dispatchpb.CronJob {
 	return pj
 }
 
-// --- Interceptors ---
+// --- Interceptor ---
 
 func loggingUnaryInterceptor() grpc.UnaryServerInterceptor {
 	return func(ctx context.Context, req any, info *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (any, error) {

@@ -11,17 +11,16 @@ import (
 	"github.com/google/uuid"
 )
 
-// BeforeSubmitHook is called before task submission. Return non-nil error to reject.
-// Used for rate limiting, quota checks, etc. at the infrastructure layer.
+// BeforeSubmitHook 在任务提交前调用。返回非 nil error 表示拒绝提交。
+// 基础设施层用它执行限流、配额检查等逻辑。
 type BeforeSubmitHook func(task *entity.Task) error
 
-// AfterSubmitHook is called after a task is successfully submitted.
-// Used for logging, metrics, etc. at the infrastructure layer.
+// AfterSubmitHook 在任务成功提交后调用。
+// 基础设施层用它执行日志、metrics 等逻辑。
 type AfterSubmitHook func(task *entity.Task)
 
-// TaskServiceImpl handles task CRUD and queue operations for the API Server.
-// Hooks allow infrastructure concerns (rate limiting, logging, metrics)
-// to be injected without polluting the domain layer.
+// TaskServiceImpl 处理 API Server 的任务 CRUD 和队列操作。
+// Hook 允许注入限流、日志、metrics 等基础设施关注点，而不污染领域层。
 type TaskServiceImpl struct {
 	broker         repository.QueueBroker
 	taskStore      repository.TaskStore
@@ -31,7 +30,7 @@ type TaskServiceImpl struct {
 	afterSubmit    AfterSubmitHook
 }
 
-// NewTaskServiceImpl creates a new TaskServiceImpl.
+// NewTaskServiceImpl 创建新的 TaskServiceImpl。
 func NewTaskServiceImpl(broker repository.QueueBroker, taskStore repository.TaskStore, cronStore repository.CronJobStore) *TaskServiceImpl {
 	return &TaskServiceImpl{
 		broker:    broker,
@@ -40,17 +39,17 @@ func NewTaskServiceImpl(broker repository.QueueBroker, taskStore repository.Task
 	}
 }
 
-// SetBeforeSubmit registers a hook called before task submission (e.g., rate limiting).
+// SetBeforeSubmit 注册任务提交前调用的 hook（例如限流）。
 func (s *TaskServiceImpl) SetBeforeSubmit(hook BeforeSubmitHook) {
 	s.beforeSubmit = hook
 }
 
-// SetRouteValidator sets an optional route validator that checks queue+type feasibility.
+// SetRouteValidator 设置可选的 route validator，用于检查 queue+type 可行性。
 func (s *TaskServiceImpl) SetRouteValidator(rv *RouteValidator) {
 	s.routeValidator = rv
 }
 
-// SetAfterSubmit registers a hook called after successful task submission (e.g., logging/metrics).
+// SetAfterSubmit 注册任务成功提交后调用的 hook（例如日志和 metrics）。
 func (s *TaskServiceImpl) SetAfterSubmit(hook AfterSubmitHook) {
 	s.afterSubmit = hook
 }
@@ -76,7 +75,7 @@ func (s *TaskServiceImpl) SubmitTask(ctx context.Context, task *entity.Task) err
 	task.CreatedAt = now
 	task.UpdatedAt = now
 
-	// Pre-submit hook (rate limiting, quota checks)
+	// 提交前 hook（限流、配额检查）
 	if s.beforeSubmit != nil {
 		if err := s.beforeSubmit(task); err != nil {
 			return err
@@ -93,17 +92,16 @@ func (s *TaskServiceImpl) SubmitTask(ctx context.Context, task *entity.Task) err
 		return fmt.Errorf("persist task: %w", err)
 	}
 
-	// Enqueue to Redis. If this fails, the task is still persisted in MySQL
-	// and the scheduler's compensate loop will re-enqueue it within 30 seconds.
-	// We intentionally do NOT return error here to avoid client retries
-	// that would create duplicate tasks.
+	// 入队到 Redis。即使这里失败，任务仍已持久化到 MySQL，
+	// scheduler 的补偿循环会在 30 秒内重新入队。
+	// 这里刻意不返回错误，避免客户端重试导致重复任务。
 	if task.ScheduleAt != nil || task.Delay.Duration > 0 {
 		_ = s.broker.EnqueueDelayed(ctx, task.QueueName, task)
 	} else {
 		_ = s.broker.Enqueue(ctx, task.QueueName, task)
 	}
 
-	// Post-submit hook (logging, metrics)
+	// 提交后 hook（日志、metrics）
 	if s.afterSubmit != nil {
 		s.afterSubmit(task)
 	}
@@ -130,12 +128,12 @@ func (s *TaskServiceImpl) CancelTask(ctx context.Context, taskID string) error {
 		return err
 	}
 
-	// Best-effort: remove from Redis queue to prevent workers from picking it up.
+	// 尽力而为：从 Redis 队列移除，避免 worker 继续取到该任务。
 	if err := s.broker.Remove(ctx, task.QueueName, taskID); err != nil {
 		log.Errorf("remove cancelled task %s from queue: %v", taskID, err)
 	}
 
-	// Best-effort: signal running workers to cancel this task's context.
+	// 尽力而为：通知正在运行的 worker 取消该任务的 context。
 	if err := s.broker.PublishCancel(ctx, taskID); err != nil {
 		log.Errorf("publish cancel signal for task %s: %v", taskID, err)
 	}
@@ -155,7 +153,7 @@ func (s *TaskServiceImpl) QueueStats(ctx context.Context, queue string) (*entity
 	return s.broker.Stats(ctx, queue)
 }
 
-// --- CronJob operations ---
+// --- CronJob 操作 ---
 
 func (s *TaskServiceImpl) CreateCronJob(ctx context.Context, job *entity.CronJob) error {
 	if job.ID == "" {
@@ -170,8 +168,8 @@ func (s *TaskServiceImpl) CreateCronJob(ctx context.Context, job *entity.CronJob
 	if job.MaxRetries == 0 {
 		job.MaxRetries = 3
 	}
-	// NextRunAt must be set by the caller (HTTP/gRPC handler) after parsing cron expr.
-	// Domain layer does not depend on cron parsing library.
+	// NextRunAt 必须由调用方（HTTP/gRPC handler）解析 cron expr 后设置。
+	// 领域层不依赖 cron 解析库。
 	return s.cronStore.CreateCronJob(ctx, job)
 }
 

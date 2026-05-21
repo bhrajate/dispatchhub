@@ -1,8 +1,7 @@
 #!/usr/bin/env bash
-# Capture client-side hardware / OS / load generator versions for the perf
-# report header. Single-machine WSL2: same host as server, but kept separate
-# for portability.
-# Usage: capture-client.sh [output_path]
+# 采集 client 侧硬件、OS 和压测工具版本，用于性能报告头部。
+# 单机 WSL2 场景下它与 server 是同一主机，但保留拆分以便移植。
+# 用法：capture-client.sh [output_path]
 set -euo pipefail
 
 OUT="${1:-test/perf/results/latest/env-client.txt}"

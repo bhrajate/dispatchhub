@@ -1,16 +1,16 @@
 #!/usr/bin/env python3
 """
-Render Markdown tables from index.csv + per-cell server-metrics.prom snapshots.
+根据 index.csv 和每个 cell 的 server-metrics.prom 快照渲染 Markdown 表格。
 
-Usage:
+用法：
     python3 test/perf/render_report.py [results_dir]
 
-Prints to stdout:
-- Per-endpoint actual-RPS / p99 tables (rows = target RPS)
-- Resource usage table (one row per cell with non-zero metrics)
-- Summary table (highest passing RPS step per endpoint)
+输出到 stdout：
+- 每个 endpoint 的 actual-RPS / p99 表（行 = 目标 RPS）
+- 资源使用表（每个有非零 metrics 的 cell 一行）
+- 概要表（每个 endpoint 最高通过 RPS 阶梯）
 
-index.csv schema (open-model, RPS-driven):
+index.csv schema（open-model，RPS 驱动）：
     endpoint,rps_target,rps_actual,p50_ms,p95_ms,p99_ms,errors,verdict
 """
 import csv
@@ -47,7 +47,7 @@ def load_index(path):
 
 
 def parse_metrics(prom_path):
-    """Pull a few headline series from a Prometheus text dump."""
+    """从 Prometheus 文本 dump 中提取几个核心序列。"""
     if not prom_path.exists():
         return {}
     out = {}
@@ -68,12 +68,12 @@ def parse_metrics(prom_path):
 
 
 def cpu_pct_from_markers(start_path, end_path):
-    """Mean CPU% over the cell window via process_cpu_seconds_total diff.
+    """通过 process_cpu_seconds_total 差分计算 cell 窗口内的平均 CPU%。
 
-    Each marker file holds one line "<cpu_seconds> <wallclock_ns>" captured
-    by run.sh::sample_cpu_marker before and after the driver. Returns the
-    mean CPU% (100 * Δcpu / Δwall_seconds) — a value of 100 means one core
-    fully utilised; can exceed 100 with multi-core parallelism.
+    每个 marker 文件包含一行 "<cpu_seconds> <wallclock_ns>"，
+    由 run.sh::sample_cpu_marker 在 driver 前后采集。
+    返回平均 CPU%（100 * Δcpu / Δwall_seconds）；
+    100 表示单核满载，多核并行时可以超过 100。
     """
     def _read(p):
         if not p.exists():
@@ -114,7 +114,7 @@ def fmt_num(x, kind):
 
 
 def rps_columns(rows):
-    """Stable, present-only RPS column set in canonical order."""
+    """按标准顺序返回稳定且仅包含已出现值的 RPS 列集合。"""
     present = {r["rps_target"] for r in rows}
     cols = [r for r in RPS_ORDER if r in present]
     extras = sorted(present - set(cols))
@@ -178,7 +178,7 @@ def main():
     rows = load_index(idx)
     cols = rps_columns(rows)
 
-    # Summary — highest PASS step per endpoint.
+    # 概要：每个 endpoint 的最高 PASS 阶梯。
     print("## 一、概要 (Summary)\n")
     print("场景：loopback；驱动模型：open-model 固定 RPS 阶梯；verdict = `errors ≤ 1% 且 实际 RPS ≥ 目标 × 95%`。\n")
     print("> **测量工具差异提醒**：HTTP 用 wrk2 + HdrHistogram，对 coordinated")
@@ -202,7 +202,7 @@ def main():
     print()
     print("⁽¹⁾ 见上方 ghz 不修正 coordinated omission 的提醒。\n")
 
-    # Per-endpoint tables
+    # 按 endpoint 输出表格
     titles = {
         "http_submit_task":   "### 4.1 `POST /api/v1/tasks` (HTTP 写入)",
         "grpc_submit_task":   "### 4.2 gRPC `SubmitTask`",
@@ -215,7 +215,7 @@ def main():
         print(render_endpoint_tables(rows, ep, cols))
         print()
 
-    # Resource table
+    # 资源使用表
     print("## 五、服务端资源占用\n")
     print("CPU% = cell 起止两次 `process_cpu_seconds_total` 的差分除以墙钟秒数")
     print("（100 = 单核满载，>100 表示多核并行）；RSS / goroutines = cell 结束")

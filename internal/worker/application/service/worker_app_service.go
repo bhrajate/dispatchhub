@@ -19,22 +19,22 @@ import (
 	"github.com/shirou/gopsutil/v3/mem"
 )
 
-// Handler processes a specific task type.
+// Handler 处理指定的任务类型。
 type Handler interface {
 	Handle(ctx context.Context, task *entity.Task) *entity.TaskResult
 }
 
-// HandlerFunc is an adapter for using ordinary functions as Handlers.
+// HandlerFunc 是将普通函数作为 Handler 使用的适配器。
 type HandlerFunc func(ctx context.Context, task *entity.Task) *entity.TaskResult
 
 func (f HandlerFunc) Handle(ctx context.Context, task *entity.Task) *entity.TaskResult {
 	return f(ctx, task)
 }
 
-// Middleware wraps a Handler to add cross-cutting concerns.
+// Middleware 包装 Handler，用于添加横切关注点。
 type Middleware func(Handler) Handler
 
-// WorkerConfig holds worker configuration.
+// WorkerConfig 保存 worker 配置。
 type WorkerConfig struct {
 	ID                string
 	Queues            []string
@@ -44,10 +44,10 @@ type WorkerConfig struct {
 	TaskTimeout       time.Duration
 }
 
-// WorkerAppService is the data-plane component that fetches tasks,
-// executes handlers, and reports heartbeats.
+// WorkerAppService 是 data-plane 组件，负责拉取任务、
+// 执行 handler 并上报 heartbeat。
 type WorkerAppService struct {
-	cfg        WorkerConfig
+	cfg       WorkerConfig
 	broker    repository.QueueBroker
 	registry  repository.WorkerRegistry
 	taskStore repository.TaskStore
@@ -65,7 +65,7 @@ type WorkerAppService struct {
 	wg     sync.WaitGroup
 }
 
-// NewWorkerAppService creates a new WorkerAppService.
+// NewWorkerAppService 创建新的 WorkerAppService。
 func NewWorkerAppService(
 	cfg WorkerConfig,
 	broker repository.QueueBroker,
@@ -81,34 +81,34 @@ func NewWorkerAppService(
 	}
 
 	return &WorkerAppService{
-		cfg:        cfg,
-		broker:     broker,
-		registry:   registry,
+		cfg:       cfg,
+		broker:    broker,
+		registry:  registry,
 		taskStore: taskStore,
-		handlers:   make(map[string]Handler),
-		cancels:    make(map[string]context.CancelFunc),
-		sem:        make(chan struct{}, cfg.Concurrency),
+		handlers:  make(map[string]Handler),
+		cancels:   make(map[string]context.CancelFunc),
+		sem:       make(chan struct{}, cfg.Concurrency),
 	}
 }
 
-// Register registers a handler for a task type.
+// Register 为任务类型注册 handler。
 func (w *WorkerAppService) Register(taskType string, handler Handler) {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 	w.handlers[taskType] = handler
 }
 
-// RegisterFunc is a convenience method for registering handler functions.
+// RegisterFunc 是注册 handler 函数的便捷方法。
 func (w *WorkerAppService) RegisterFunc(taskType string, fn func(ctx context.Context, task *entity.Task) *entity.TaskResult) {
 	w.Register(taskType, HandlerFunc(fn))
 }
 
-// Use adds middleware that wraps all handlers.
+// Use 添加包装所有 handler 的 middleware。
 func (w *WorkerAppService) Use(mw ...Middleware) {
 	w.mw = append(w.mw, mw...)
 }
 
-// Run starts the worker.
+// Run 启动 worker。
 func (w *WorkerAppService) Run(ctx context.Context) error {
 	hostname, _ := os.Hostname()
 	now := time.Now()
@@ -202,14 +202,14 @@ func (w *WorkerAppService) fetchLoop(ctx context.Context) {
 				return
 			case <-time.After(backoff):
 			}
-			// Exponential backoff on empty queue
+			// 空队列时使用指数 backoff
 			if backoff < maxBackoff {
 				backoff *= 2
 			}
 			continue
 		}
 
-		// Got a task — reset backoff
+		// 已获取任务，重置 backoff
 		backoff = minBackoff
 
 		w.wg.Add(1)
@@ -233,22 +233,20 @@ func (w *WorkerAppService) processTask(ctx context.Context, task *entity.Task) {
 	logger := log.With("task_id", task.ID, "type", task.Type, "queue", task.QueueName)
 	logger.Infof("processing task (active=%d/%d)", active, w.cfg.Concurrency)
 
-	// Check latest state from MySQL — skip if already cancelled/completed
+	// 从 MySQL 检查最新状态，若已取消或完成则跳过
 	if latest, err := w.taskStore.Get(ctx, task.ID); err == nil && latest != nil && latest.IsTerminal() {
 		logger.Infof("task already in terminal state %s, skipping", latest.State)
 		_ = w.broker.Ack(ctx, task.QueueName, task.ID)
 		return
 	}
 
-	// Create a cancellable context for this task so it can be
-	// terminated via cancel signal from the API server.
+	// 为该任务创建可取消的 context，使其可被 API server 的取消信号终止。
 	taskCtx, taskCancel := context.WithCancel(ctx)
 	defer taskCancel()
 	defer w.untrackCancel(task.ID)
 	w.trackCancel(task.ID, taskCancel)
 
-	// Re-check state after registering cancel to close the race window
-	// where the cancel signal arrives before trackCancel is called.
+	// 注册 cancel 后再次检查状态，关闭取消信号早于 trackCancel 到达的竞争窗口。
 	if latest, err := w.taskStore.Get(ctx, task.ID); err == nil && latest != nil && latest.IsTerminal() {
 		logger.Infof("task cancelled during setup, skipping")
 		_ = w.broker.Ack(ctx, task.QueueName, task.ID)
@@ -279,15 +277,15 @@ func (w *WorkerAppService) processTask(ctx context.Context, task *entity.Task) {
 		logger.Errorf("update task state to running: %v", err)
 	}
 
-	// Timeout is handled by the Timeout middleware in the middleware chain.
-	// Do NOT add another context.WithTimeout here to avoid double-timeout.
-	// Use taskCtx so that cancel signals propagate to the handler.
+	// Timeout 由 middleware 链中的 Timeout middleware 处理。
+	// 这里不要再添加 context.WithTimeout，避免双重 timeout。
+	// 使用 taskCtx，确保取消信号能传递给 handler。
 	result := w.safeHandle(taskCtx, handler, task)
 
 	duration := time.Since(start)
 	metrics.TaskDuration.WithLabelValues(task.QueueName, task.Type).Observe(duration.Seconds())
 
-	// Check if this was an explicit cancellation (not timeout)
+	// 检查这是否为显式取消，而不是 timeout
 	if result.Error != nil && taskCtx.Err() == context.Canceled {
 		if latest, err := w.taskStore.Get(ctx, task.ID); err == nil && latest != nil && latest.State == entity.TaskStateCancelled {
 			logger.Infof("task cancelled after %v", duration)

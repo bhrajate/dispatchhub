@@ -8,7 +8,7 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-// Shared infrastructure config types used by all services.
+// 所有服务共用的基础设施配置类型。
 
 type ServerConfig struct {
 	GRPCAddr string `yaml:"grpc_addr" env:"DISPATCH_GRPC_ADDR"`
@@ -43,10 +43,10 @@ type MySQLConfig struct {
 	MaxOpenConns    int           `yaml:"max_open_conns"`
 	MaxIdleConns    int           `yaml:"max_idle_conns"`
 	ConnMaxLifetime time.Duration `yaml:"conn_max_lifetime"`
-	// ConnMaxIdleTime caps how long an idle connection may live before being
-	// closed. Optional — zero (default) keeps idle connections forever, which
-	// can leave middleboxes / MySQL itself with stale TCP state. Recommended
-	// 5-30 minutes in production, shorter than wait_timeout on the server.
+	// ConnMaxIdleTime 限制 idle connection 在关闭前可存活的时长。
+	// 可选项，0（默认值）表示永久保留 idle connection，
+	// 这可能让中间设备或 MySQL 自身残留 stale TCP 状态。
+	// 生产环境推荐 5-30 分钟，短于服务端 wait_timeout。
 	ConnMaxIdleTime time.Duration `yaml:"conn_max_idle_time"`
 }
 
@@ -74,13 +74,13 @@ type QueueRateLimitSpec struct {
 	Burst int     `yaml:"burst"`
 }
 
-// Active reports whether the limiter should be wired in. A zero rate means
-// "no limit" — callers should skip building the limiter entirely.
+// Active 表示是否应接入 limiter。rate 为 0 表示“不限流”，
+// 调用方应完全跳过 limiter 构造。
 func (c RateLimitConfig) Active() bool {
 	return c.Enabled && c.DefaultRate > 0 && c.DefaultBurst > 0
 }
 
-// Shared defaults for infrastructure configs.
+// 基础设施配置的共享默认值。
 
 func DefaultEtcdConfig() EtcdConfig {
 	return EtcdConfig{
@@ -133,7 +133,7 @@ func DefaultRateLimitConfig() RateLimitConfig {
 	}
 }
 
-// LoadYAML reads a YAML file and unmarshals it into the target struct.
+// LoadYAML 读取 YAML 文件并反序列化到目标结构体。
 func LoadYAML(path string, target any) error {
 	data, err := os.ReadFile(path)
 	if err != nil {
@@ -142,7 +142,7 @@ func LoadYAML(path string, target any) error {
 	return yaml.Unmarshal(data, target)
 }
 
-// ApplyEnvOverrides overrides infrastructure config fields from environment variables.
+// ApplyEnvOverrides 使用环境变量覆盖基础设施配置字段。
 
 func ApplyServerEnvOverrides(cfg *ServerConfig) {
 	if v := os.Getenv("DISPATCH_GRPC_ADDR"); v != "" {

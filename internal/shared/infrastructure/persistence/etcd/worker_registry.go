@@ -17,7 +17,7 @@ const (
 	leaseTTL     = 15
 )
 
-// WorkerRegistry implements repository.WorkerRegistry using etcd.
+// WorkerRegistry 使用 etcd 实现 repository.WorkerRegistry。
 type WorkerRegistry struct {
 	client *clientv3.Client
 

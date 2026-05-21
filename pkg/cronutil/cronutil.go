@@ -6,10 +6,10 @@ import (
 	"github.com/robfig/cron/v3"
 )
 
-// Parser is a standard cron expression parser supporting 5-field + descriptors.
+// Parser 是标准 cron 表达式解析器，支持 5 字段表达式和 descriptor。
 var Parser = cron.NewParser(cron.Minute | cron.Hour | cron.Dom | cron.Month | cron.Dow | cron.Descriptor)
 
-// NextRunTime parses the cron expression and returns the next run time after the given time.
+// NextRunTime 解析 cron 表达式，并返回给定时间之后的下一次运行时间。
 func NextRunTime(expr string, after time.Time) (time.Time, error) {
 	sched, err := Parser.Parse(expr)
 	if err != nil {

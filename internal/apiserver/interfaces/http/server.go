@@ -15,24 +15,24 @@ import (
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 )
 
-// registerPprofHooks is wired by pprof.go (build tag `pprof`) and by
-// pprof_off.go (default). Keeping it as a package var lets us flip pprof
-// on with a build tag without leaving handlers exposed in production.
+// registerPprofHooks 由 pprof.go（build tag `pprof`）和 pprof_off.go（默认）接入。
+// 保持为 package 变量，使我们能通过 build tag 开启 pprof，
+// 同时避免在生产环境暴露 handler。
 var registerPprofHooks func(*http.ServeMux)
 
-// HealthChecker is called by the readyz endpoint to verify dependencies.
-// Returns nil if healthy, or an error describing the unhealthy component.
+// HealthChecker 由 readyz endpoint 调用，用于校验依赖。
+// 健康时返回 nil，否则返回描述异常组件的 error。
 type HealthChecker func(ctx context.Context) error
 
-// Server provides the REST API and metrics endpoint.
+// Server 提供 REST API 和 metrics endpoint。
 type Server struct {
-	taskSvc      apisvc.TaskService
-	healthCheck  HealthChecker
-	mux          *http.ServeMux
-	server       *http.Server
+	taskSvc     apisvc.TaskService
+	healthCheck HealthChecker
+	mux         *http.ServeMux
+	server      *http.Server
 }
 
-// NewServer creates a new HTTP server with REST API routes.
+// NewServer 创建带 REST API 路由的新 HTTP server。
 func NewServer(taskSvc apisvc.TaskService, addr string, healthCheck HealthChecker) *Server {
 	mux := http.NewServeMux()
 	s := &Server{
@@ -54,7 +54,7 @@ func NewServer(taskSvc apisvc.TaskService, addr string, healthCheck HealthChecke
 	mux.HandleFunc("POST /api/v1/tasks/{id}/cancel", s.handleCancelTask)
 	mux.HandleFunc("GET /api/v1/queues/{name}/stats", s.handleQueueStats)
 
-	// CronJob routes
+	// CronJob 路由
 	mux.HandleFunc("POST /api/v1/cronjobs", s.handleCreateCronJob)
 	mux.HandleFunc("GET /api/v1/cronjobs/{id}", s.handleGetCronJob)
 	mux.HandleFunc("GET /api/v1/cronjobs", s.handleListCronJobs)
@@ -207,7 +207,7 @@ func (s *Server) handleQueueStats(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, stats)
 }
 
-// --- CronJob handlers ---
+// --- CronJob handler ---
 
 func (s *Server) handleCreateCronJob(w http.ResponseWriter, r *http.Request) {
 	var req struct {
@@ -256,7 +256,7 @@ func (s *Server) handleCreateCronJob(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// Parse cron expression and compute initial next_run_at (infrastructure concern, not domain)
+	// 解析 cron expression 并计算初始 next_run_at（基础设施关注点，不属于领域层）
 	next, err := cronutil.NextRunTime(req.CronExpr, time.Now())
 	if err != nil {
 		writeError(w, http.StatusBadRequest, "invalid cron expression: %v", err)

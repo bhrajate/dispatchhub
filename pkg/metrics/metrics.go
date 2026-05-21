@@ -6,7 +6,7 @@ import (
 )
 
 var (
-	// Scheduler metrics
+	// Scheduler 指标
 	TasksSubmitted = promauto.NewCounterVec(prometheus.CounterOpts{
 		Namespace: "dispatchhub",
 		Subsystem: "scheduler",
@@ -37,7 +37,7 @@ var (
 		Buckets:   prometheus.ExponentialBuckets(0.0001, 2, 15),
 	})
 
-	// Worker metrics
+	// Worker 指标
 	TasksProcessed = promauto.NewCounterVec(prometheus.CounterOpts{
 		Namespace: "dispatchhub",
 		Subsystem: "worker",
@@ -67,7 +67,7 @@ var (
 		Help:      "Number of tasks currently being processed",
 	}, []string{"queue"})
 
-	// Queue metrics
+	// Queue 指标
 	QueueDepth = promauto.NewGaugeVec(prometheus.GaugeOpts{
 		Namespace: "dispatchhub",
 		Subsystem: "queue",
@@ -75,7 +75,7 @@ var (
 		Help:      "Number of pending tasks in queue",
 	}, []string{"queue", "state"})
 
-	// System metrics
+	// 系统指标
 	LeaderElections = promauto.NewCounter(prometheus.CounterOpts{
 		Namespace: "dispatchhub",
 		Subsystem: "scheduler",

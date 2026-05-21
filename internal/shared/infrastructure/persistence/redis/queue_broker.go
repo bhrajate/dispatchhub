@@ -20,7 +20,7 @@ const (
 	statsKey    = keyPrefix + "queue:%s:stats"
 )
 
-// QueueBroker implements repository.QueueBroker using Redis sorted sets.
+// QueueBroker 使用 Redis sorted set 实现 repository.QueueBroker。
 type QueueBroker struct {
 	client redis.UniversalClient
 }
@@ -242,15 +242,13 @@ func (q *QueueBroker) Stats(ctx context.Context, queue string) (*entity.QueueSta
 	return stats, nil
 }
 
-// enqueueIfNotInflightScript atomically checks if a task ID exists in the
-// inflight hash. If it does, the task is being processed — skip. If not,
-// ZADD it to the ready queue. This prevents the compensate loop from
-// re-enqueuing tasks that a worker has already dequeued but not yet
-// updated in MySQL.
+// enqueueIfNotInflightScript 原子检查 task ID 是否存在于 inflight hash。
+// 若存在，说明任务正在处理，跳过；若不存在，则通过 ZADD 写入 ready 队列。
+// 这可以避免补偿循环重复入队已被 worker 取走但尚未更新到 MySQL 的任务。
 //
-// KEYS[1] = inflight key, KEYS[2] = ready key
-// ARGV[1] = task ID, ARGV[2] = score, ARGV[3] = task JSON
-// Returns: 1 = enqueued, 0 = skipped (in inflight)
+// KEYS[1] = inflight key，KEYS[2] = ready key
+// ARGV[1] = task ID，ARGV[2] = score，ARGV[3] = task JSON
+// 返回：1 = 已入队，0 = 已跳过（在 inflight 中）
 var enqueueIfNotInflightScript = redis.NewScript(`
 local inflight_key = KEYS[1]
 local ready_key = KEYS[2]
@@ -283,16 +281,16 @@ func (q *QueueBroker) EnqueueIfNotInflight(ctx context.Context, queue string, ta
 
 const cancelChannel = keyPrefix + "task:cancel"
 
-// removeScript atomically removes a task from all queue stages.
-// KEYS[1] = ready key, KEYS[2] = delayed key, KEYS[3] = inflight key
-// ARGV[1] = task ID to match in JSON members
+// removeScript 原子地从所有队列阶段移除任务。
+// KEYS[1] = ready key，KEYS[2] = delayed key，KEYS[3] = inflight key
+// ARGV[1] = 用于匹配 JSON member 的 task ID
 var removeScript = redis.NewScript(`
 local removed = 0
--- Remove from inflight hash (taskID -> JSON)
+-- 从 inflight hash 中移除（taskID -> JSON）
 if redis.call('HDEL', KEYS[3], ARGV[1]) == 1 then
     removed = removed + 1
 end
--- Remove from ready sorted set (scan for matching task ID in JSON member)
+-- 从 ready sorted set 中移除（扫描 JSON member 中匹配的 task ID）
 local cursor = "0"
 repeat
     local result = redis.call('ZSCAN', KEYS[1], cursor, 'MATCH', '*"id":"' .. ARGV[1] .. '"*', 'COUNT', 100)
@@ -303,7 +301,7 @@ repeat
         removed = removed + 1
     end
 until cursor == "0"
--- Remove from delayed sorted set
+-- 从 delayed sorted set 中移除
 cursor = "0"
 repeat
     local result = redis.call('ZSCAN', KEYS[2], cursor, 'MATCH', '*"id":"' .. ARGV[1] .. '"*', 'COUNT', 100)

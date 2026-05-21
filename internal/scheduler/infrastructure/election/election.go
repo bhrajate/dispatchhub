@@ -10,7 +10,7 @@ import (
 	"go.etcd.io/etcd/client/v3/concurrency"
 )
 
-// LeaderElector performs leader election using etcd.
+// LeaderElector 使用 etcd 执行 Leader 选举。
 type LeaderElector struct {
 	client *clientv3.Client
 	prefix string
@@ -25,7 +25,7 @@ type LeaderElector struct {
 	onNewLeader      func(identity string)
 }
 
-// Config holds leader election parameters.
+// Config 保存 Leader 选举参数。
 type Config struct {
 	Client           *clientv3.Client
 	ElectionPrefix   string
@@ -36,7 +36,7 @@ type Config struct {
 	OnNewLeader      func(identity string)
 }
 
-// New creates a new LeaderElector.
+// New 创建新的 LeaderElector。
 func New(cfg Config) *LeaderElector {
 	if cfg.TTL <= 0 {
 		cfg.TTL = 15
@@ -52,7 +52,7 @@ func New(cfg Config) *LeaderElector {
 	}
 }
 
-// Run starts the leader election loop.
+// Run 启动 Leader 选举循环。
 func (le *LeaderElector) Run(ctx context.Context) error {
 	for {
 		select {
@@ -80,9 +80,8 @@ func (le *LeaderElector) campaign(ctx context.Context) error {
 
 	election := concurrency.NewElection(session, le.prefix)
 
-	// Use a scoped context so the observe goroutine is guaranteed to
-	// exit before this function returns, preventing goroutine leaks
-	// and data races across campaign retries.
+	// 使用局部 context，确保 observe goroutine 在本函数返回前退出，
+	// 避免 goroutine 泄漏和 campaign 重试之间的数据竞争。
 	observeCtx, observeCancel := context.WithCancel(ctx)
 
 	var observeWg sync.WaitGroup
@@ -155,7 +154,7 @@ func (le *LeaderElector) observe(ctx context.Context, election *concurrency.Elec
 	}
 }
 
-// IsLeader returns whether this instance currently holds the leader lock.
+// IsLeader 返回当前实例是否持有 Leader 锁。
 func (le *LeaderElector) IsLeader() bool {
 	le.mu.RLock()
 	defer le.mu.RUnlock()

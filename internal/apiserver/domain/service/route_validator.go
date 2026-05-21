@@ -11,15 +11,14 @@ import (
 	"github.com/dispatchhub/dispatchhub/pkg/log"
 )
 
-// RouteValidator checks whether a queue+type combination has at least one
-// online worker capable of handling it. The worker topology is cached and
-// refreshed periodically to avoid hitting etcd on every task submission.
+// RouteValidator 检查 queue+type 组合是否至少有一个 online worker 可处理。
+// worker 拓扑会被缓存并定期刷新，避免每次提交任务都访问 etcd。
 type RouteValidator struct {
 	registry     repository.WorkerRegistry
 	refreshEvery time.Duration
 
 	mu          sync.RWMutex
-	queueTypes  map[string]map[string]struct{} // queue -> set of task types
+	queueTypes  map[string]map[string]struct{} // queue -> task type 集合
 	lastRefresh time.Time
 }
 
@@ -31,11 +30,11 @@ func NewRouteValidator(registry repository.WorkerRegistry, refreshEvery time.Dur
 	}
 }
 
-// Validate returns an error if no online worker can handle taskType on the
-// given queue. Returns nil (allows submission) when:
-//   - the combination is valid
-//   - no workers are online yet (cold-start tolerance)
-//   - the cache refresh fails (fail-open to avoid blocking submissions)
+// Validate 在指定 queue 上没有 online worker 可处理 taskType 时返回错误。
+// 以下情况返回 nil（允许提交）：
+//   - 组合有效
+//   - 当前还没有 online worker（冷启动容忍）
+//   - 缓存刷新失败（fail-open，避免阻塞提交）
 func (v *RouteValidator) Validate(ctx context.Context, queue, taskType string) error {
 	v.mu.RLock()
 	stale := time.Since(v.lastRefresh) > v.refreshEvery
@@ -52,7 +51,7 @@ func (v *RouteValidator) Validate(ctx context.Context, queue, taskType string) e
 	defer v.mu.RUnlock()
 
 	if len(v.queueTypes) == 0 {
-		return nil // no workers online yet — allow submission
+		return nil // 当前还没有 online worker，允许提交
 	}
 
 	types, queueExists := v.queueTypes[queue]

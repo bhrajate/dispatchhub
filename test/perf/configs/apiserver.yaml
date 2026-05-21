@@ -17,9 +17,9 @@ redis:
 
 mysql:
   dsn: "root:@tcp(localhost:33307)/dispatchhub?charset=utf8mb4&parseTime=true&loc=Local"
-  # Pool sized so idle == open: avoids the database/sql connection churn that
-  # surfaced as "driver: bad connection" at 300 RPS in r1, where idle conns
-  # above max_idle_conns were closed and rebuilt under load.
+  # 连接池设置为 idle == open：避免 r1 中 300 RPS 下暴露的 database/sql 连接抖动，
+  # 当时超过 max_idle_conns 的 idle connection 会在负载下关闭并重建，
+  # 进而出现 "driver: bad connection"。
   max_open_conns: 50
   max_idle_conns: 50
   conn_max_lifetime: 1h
@@ -35,7 +35,7 @@ log:
   format: json
   output: stdout
 
-# Bench config: rate limiter disabled to measure raw service ceiling.
+# Benchmark 配置：禁用 rate limiter，用于测量服务原始上限。
 rate_limit:
   enabled: false
   default_rate: 1000

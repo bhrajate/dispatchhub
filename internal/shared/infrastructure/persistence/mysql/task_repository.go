@@ -10,12 +10,12 @@ import (
 	"gorm.io/gorm"
 )
 
-// TaskRepository implements repository.TaskRepository using MySQL via GORM.
+// TaskRepository 基于 GORM 使用 MySQL 实现 repository.TaskRepository。
 type TaskRepository struct {
 	db *gorm.DB
 }
 
-// NewTaskRepository creates a task repository and auto-migrates the schema.
+// NewTaskRepository 创建任务仓储并自动迁移 schema。
 func NewTaskRepository(db *gorm.DB) (*TaskRepository, error) {
 	if err := db.AutoMigrate(&entity.Task{}); err != nil {
 		return nil, fmt.Errorf("auto migrate: %w", err)
@@ -139,7 +139,7 @@ func (s *TaskRepository) HasRunningTasks(ctx context.Context, taskType, namespac
 	return count > 0, err
 }
 
-// Verify MySQL TaskRepository satisfies all repository interfaces.
+// 校验 MySQL TaskRepository 满足所有 repository 接口。
 var (
 	_ repository.TaskReader      = (*TaskRepository)(nil)
 	_ repository.TaskWriter      = (*TaskRepository)(nil)

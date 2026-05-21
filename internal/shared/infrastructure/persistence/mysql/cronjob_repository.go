@@ -10,12 +10,12 @@ import (
 	"gorm.io/gorm"
 )
 
-// CronJobRepository implements cron job persistence using MySQL via GORM.
+// CronJobRepository 基于 GORM 使用 MySQL 实现 cron job 持久化。
 type CronJobRepository struct {
 	db *gorm.DB
 }
 
-// NewCronJobRepository creates a cron job repository and auto-migrates the schema.
+// NewCronJobRepository 创建 cron job 仓储并自动迁移 schema。
 func NewCronJobRepository(db *gorm.DB) (*CronJobRepository, error) {
 	if err := db.AutoMigrate(&entity.CronJob{}); err != nil {
 		return nil, fmt.Errorf("auto migrate cron_jobs: %w", err)
@@ -74,7 +74,7 @@ func (r *CronJobRepository) ListCronJobs(ctx context.Context, namespace string, 
 	return jobs, total, nil
 }
 
-// FindDueCronJobs returns enabled cron jobs whose next_run_at <= now.
+// FindDueCronJobs 返回已启用且 next_run_at <= now 的 cron job。
 func (r *CronJobRepository) FindDueCronJobs(ctx context.Context, limit int) ([]*entity.CronJob, error) {
 	var jobs []*entity.CronJob
 	err := r.db.WithContext(ctx).

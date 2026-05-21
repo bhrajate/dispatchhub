@@ -2,12 +2,12 @@ package entity
 
 import "time"
 
-// WorkerState represents the health state of a worker node.
+// WorkerState 表示 worker 节点的健康状态。
 type WorkerState int
 
 const (
 	WorkerStateOnline   WorkerState = iota
-	WorkerStateDraining             // accepting no new tasks, finishing current
+	WorkerStateDraining             // 不再接收新任务，继续完成当前任务
 	WorkerStateOffline
 )
 
@@ -24,7 +24,7 @@ func (s WorkerState) String() string {
 	return "unknown"
 }
 
-// WorkerInfo describes a registered worker node in the cluster.
+// WorkerInfo 描述集群中已注册的 worker 节点。
 type WorkerInfo struct {
 	ID             string            `json:"id"`
 	Hostname       string            `json:"hostname"`
@@ -44,4 +44,3 @@ type WorkerInfo struct {
 	LastHeartbeat  time.Time         `json:"last_heartbeat"`
 	Version        string            `json:"version"`
 }
-

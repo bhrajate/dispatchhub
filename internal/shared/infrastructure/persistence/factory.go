@@ -10,7 +10,7 @@ import (
 	"gorm.io/gorm"
 )
 
-// NewRedisClient creates a Redis client (standalone or cluster) from config.
+// NewRedisClient 根据配置创建 Redis client（standalone 或 cluster）。
 func NewRedisClient(cfg config.RedisConfig) goredis.UniversalClient {
 	if cfg.ClusterMode {
 		return goredis.NewClusterClient(&goredis.ClusterOptions{
@@ -35,13 +35,13 @@ func NewRedisClient(cfg config.RedisConfig) goredis.UniversalClient {
 	})
 }
 
-// NewMySQLDB creates a GORM DB instance with connection pool tuning from config.
+// NewMySQLDB 根据配置创建带连接池调优的 GORM DB 实例。
 //
-// SkipDefaultTransaction is enabled because every Create/Update/Delete in this
-// codebase is a single-statement operation that doesn't need GORM's implicit
-// BEGIN/COMMIT wrapping. The wrapping costs two extra round-trips per write
-// and was the dominant CPU consumer on the API Server write path (~39% of
-// SubmitTask time per CPU profile, 2026-05-19).
+// 启用 SkipDefaultTransaction 是因为本代码库中的每个 Create/Update/Delete
+// 都是单语句操作，不需要 GORM 隐式的 BEGIN/COMMIT 包装。
+// 该包装会让每次写入增加两次额外 round-trip，
+// 并且是 API Server 写入路径上的主要 CPU 消耗来源
+// （2026-05-19 CPU profile 中约占 SubmitTask 时间的 39%）。
 func NewMySQLDB(cfg config.MySQLConfig) (*gorm.DB, error) {
 	db, err := gorm.Open(mysql.Open(cfg.DSN), &gorm.Config{
 		SkipDefaultTransaction: true,
@@ -62,7 +62,7 @@ func NewMySQLDB(cfg config.MySQLConfig) (*gorm.DB, error) {
 	return db, nil
 }
 
-// NewEtcdClient creates an etcd client from config.
+// NewEtcdClient 根据配置创建 etcd client。
 func NewEtcdClient(cfg config.EtcdConfig) (*clientv3.Client, error) {
 	return clientv3.New(clientv3.Config{
 		Endpoints:   cfg.Endpoints,

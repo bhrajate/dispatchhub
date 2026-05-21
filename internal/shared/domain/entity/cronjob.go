@@ -5,40 +5,40 @@ import (
 	"time"
 )
 
-// ConcurrencyPolicy controls how cron job triggers overlapping executions.
+// ConcurrencyPolicy 控制 cron job 触发重叠执行时的处理策略。
 type ConcurrencyPolicy string
 
 const (
-	// ConcurrencyAllow allows concurrent executions (default).
+	// ConcurrencyAllow 允许并发执行（默认）。
 	ConcurrencyAllow ConcurrencyPolicy = "Allow"
-	// ConcurrencyForbid skips a trigger if the previous execution is still running.
+	// ConcurrencyForbid 在上一次执行仍在运行时跳过本次触发。
 	ConcurrencyForbid ConcurrencyPolicy = "Forbid"
 )
 
-// CronJob defines a recurring task that is triggered on a cron schedule.
-// Each trigger creates a new Task instance with the configured spec.
+// CronJob 定义按 cron 周期触发的周期性任务。
+// 每次触发都会根据配置 spec 创建一个新的 Task 实例。
 type CronJob struct {
-	ID           string          `json:"id" gorm:"primaryKey;size:64"`
-	Name         string          `json:"name" gorm:"size:255"`
-	Namespace    string          `json:"namespace" gorm:"index;size:128"`
-	Type         string          `json:"type" gorm:"index;size:128"`
-	Payload      json.RawMessage `json:"payload" gorm:"type:text"`
-	Labels       Labels          `json:"labels" gorm:"type:text"`
-	CronExpr     string          `json:"cron_expr" gorm:"size:128"`
-	QueueName    string          `json:"queue_name" gorm:"size:128"`
-	Priority     TaskPriority    `json:"priority"`
-	Timeout      Duration        `json:"timeout"`
-	MaxRetries   int             `json:"max_retries"`
-	RetryBackoff Duration        `json:"retry_backoff"`
+	ID                string            `json:"id" gorm:"primaryKey;size:64"`
+	Name              string            `json:"name" gorm:"size:255"`
+	Namespace         string            `json:"namespace" gorm:"index;size:128"`
+	Type              string            `json:"type" gorm:"index;size:128"`
+	Payload           json.RawMessage   `json:"payload" gorm:"type:text"`
+	Labels            Labels            `json:"labels" gorm:"type:text"`
+	CronExpr          string            `json:"cron_expr" gorm:"size:128"`
+	QueueName         string            `json:"queue_name" gorm:"size:128"`
+	Priority          TaskPriority      `json:"priority"`
+	Timeout           Duration          `json:"timeout"`
+	MaxRetries        int               `json:"max_retries"`
+	RetryBackoff      Duration          `json:"retry_backoff"`
 	ConcurrencyPolicy ConcurrencyPolicy `json:"concurrency_policy" gorm:"size:32;default:'Allow'"`
 	Enabled           bool              `json:"enabled" gorm:"default:true"`
-	LastRunAt    *time.Time      `json:"last_run_at,omitempty"`
-	NextRunAt    *time.Time      `json:"next_run_at,omitempty"`
-	CreatedAt    time.Time       `json:"created_at" gorm:"autoCreateTime"`
-	UpdatedAt    time.Time       `json:"updated_at" gorm:"autoUpdateTime"`
+	LastRunAt         *time.Time        `json:"last_run_at,omitempty"`
+	NextRunAt         *time.Time        `json:"next_run_at,omitempty"`
+	CreatedAt         time.Time         `json:"created_at" gorm:"autoCreateTime"`
+	UpdatedAt         time.Time         `json:"updated_at" gorm:"autoUpdateTime"`
 }
 
-// ToTask creates a new Task instance from this CronJob's spec.
+// ToTask 根据当前 CronJob 的 spec 创建新的 Task 实例。
 func (c *CronJob) ToTask() *Task {
 	return &Task{
 		Name:         c.Name,

@@ -1,6 +1,6 @@
 package entity
 
-// QueueStats holds real-time statistics for a queue.
+// QueueStats 保存队列的实时统计信息。
 type QueueStats struct {
 	Name      string `json:"name"`
 	Pending   int64  `json:"pending"`
@@ -11,5 +11,5 @@ type QueueStats struct {
 	Failed    int64  `json:"failed"`
 }
 
-// DefaultQueueName is the queue used when none is specified.
+// DefaultQueueName 是未指定队列时使用的默认队列。
 const DefaultQueueName = "default"

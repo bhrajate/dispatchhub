@@ -11,7 +11,7 @@ import (
 	"github.com/dispatchhub/dispatchhub/pkg/metrics"
 )
 
-// SchedulerAppConfig holds configuration for the scheduler application service.
+// SchedulerAppConfig 保存 scheduler 应用服务配置。
 type SchedulerAppConfig struct {
 	HealthCheckInterval    time.Duration
 	StaleWorkerThreshold   time.Duration
@@ -27,7 +27,7 @@ type SchedulerAppConfig struct {
 	CleanupBatchSize       int
 }
 
-// DefaultSchedulerAppConfig returns sensible defaults.
+// DefaultSchedulerAppConfig 返回合理的默认配置。
 func DefaultSchedulerAppConfig() SchedulerAppConfig {
 	return SchedulerAppConfig{
 		HealthCheckInterval:    10 * time.Second,
@@ -40,19 +40,19 @@ func DefaultSchedulerAppConfig() SchedulerAppConfig {
 		CronCheckInterval:      time.Second,
 		CronBatchSize:          100,
 		CleanupInterval:        time.Hour,
-		CleanupOlderThan:       7 * 24 * time.Hour, // 7 days
+		CleanupOlderThan:       7 * 24 * time.Hour, // 7 天
 		CleanupBatchSize:       1000,
 	}
 }
 
-// SchedulerAppService orchestrates the scheduler's background reconciliation loops.
-// It does NOT handle task submission — that is the API Server's responsibility.
+// SchedulerAppService 编排 scheduler 的后台 reconciliation 循环。
+// 它不处理任务提交，那是 API Server 的职责。
 type SchedulerAppService struct {
 	cfg       SchedulerAppConfig
 	domainSvc *domainservice.SchedulerService
 }
 
-// NewSchedulerAppService creates a new SchedulerAppService.
+// NewSchedulerAppService 创建新的 SchedulerAppService。
 func NewSchedulerAppService(cfg SchedulerAppConfig, domainSvc *domainservice.SchedulerService) *SchedulerAppService {
 	return &SchedulerAppService{
 		cfg:       cfg,
@@ -60,7 +60,7 @@ func NewSchedulerAppService(cfg SchedulerAppConfig, domainSvc *domainservice.Sch
 	}
 }
 
-// Run starts the scheduler's main reconciliation loops.
+// Run 启动 scheduler 的主要 reconciliation 循环。
 func (s *SchedulerAppService) Run(ctx context.Context) error {
 	log.Info("scheduler starting reconciliation loops")
 
@@ -167,9 +167,9 @@ func (s *SchedulerAppService) metricsLoop(ctx context.Context) {
 	}
 }
 
-// compensateLoop periodically scans MySQL for tasks stuck in Pending state
-// that may not have been enqueued to Redis (e.g., Redis write failed after MySQL write).
-// ZADD is idempotent, so re-enqueuing an already-queued task is a safe no-op.
+// compensateLoop 定期扫描 MySQL 中卡在 Pending 状态的任务，
+// 这些任务可能没有成功入队到 Redis（例如 MySQL 写入后 Redis 写入失败）。
+// ZADD 是幂等的，因此重复入队已在队列中的任务是安全的 no-op。
 func (s *SchedulerAppService) compensateLoop(ctx context.Context) {
 	ticker := time.NewTicker(s.cfg.CompensateInterval)
 	defer ticker.Stop()
@@ -189,7 +189,7 @@ func (s *SchedulerAppService) compensateLoop(ctx context.Context) {
 	}
 }
 
-// cronLoop periodically checks for due cron jobs and triggers them.
+// cronLoop 定期检查到期的 cron job 并触发。
 func (s *SchedulerAppService) cronLoop(ctx context.Context) {
 	ticker := time.NewTicker(s.cfg.CronCheckInterval)
 	defer ticker.Stop()
@@ -209,7 +209,7 @@ func (s *SchedulerAppService) cronLoop(ctx context.Context) {
 	}
 }
 
-// cleanupLoop periodically deletes old terminal tasks to prevent unbounded table growth.
+// cleanupLoop 定期删除旧的终态任务，避免表无限增长。
 func (s *SchedulerAppService) cleanupLoop(ctx context.Context) {
 	ticker := time.NewTicker(s.cfg.CleanupInterval)
 	defer ticker.Stop()

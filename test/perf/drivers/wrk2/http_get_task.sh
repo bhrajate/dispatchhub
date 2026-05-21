@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# wrk2 driver: GET /api/v1/tasks/{SEED_TASK_ID} at fixed RPS for DURATION.
-# Required env: RPS, DURATION, BASE_URL, OUT_DIR, CONCURRENCY, SEED_TASK_ID.
+# wrk2 driver：以固定 RPS 请求 GET /api/v1/tasks/{SEED_TASK_ID}，持续 DURATION。
+# 必需环境变量：RPS、DURATION、BASE_URL、OUT_DIR、CONCURRENCY、SEED_TASK_ID。
 set -euo pipefail
 
 : "${RPS:?}" "${DURATION:?}" "${BASE_URL:?}" "${OUT_DIR:?}" \

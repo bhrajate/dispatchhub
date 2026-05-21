@@ -9,8 +9,8 @@ import (
 	"github.com/dispatchhub/dispatchhub/pkg/log"
 )
 
-// SetupSignalContext returns a context that is cancelled on SIGINT or SIGTERM.
-// Second signal forces immediate exit.
+// SetupSignalContext 返回在收到 SIGINT 或 SIGTERM 时取消的 context。
+// 第二次收到信号会强制立即退出。
 func SetupSignalContext() context.Context {
 	ctx, cancel := context.WithCancel(context.Background())
 

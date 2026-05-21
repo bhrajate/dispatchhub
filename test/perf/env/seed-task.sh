@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
-# Submit one task and write its ID to results/<date>/seed.env so read-path scripts
-# can hit a known existing task.
-# Usage: seed-task.sh <output_dir>
+# 提交一个任务，并将其 ID 写入 results/<date>/seed.env，
+# 使读路径脚本可以访问一个确定存在的任务。
+# 用法：seed-task.sh <output_dir>
 set -euo pipefail
 
 OUT_DIR="${1:?output_dir required}"
@@ -23,7 +23,7 @@ resp=$(curl -fsS -X POST "$BASE_URL/api/v1/tasks" \
         \"timeout\": \"30s\"
     }")
 
-# Extract task_id without jq dependency.
+# 不依赖 jq 提取 task_id。
 id=$(printf '%s' "$resp" | grep -oE '"task_id":"[^"]+"' | head -1 | cut -d'"' -f4)
 if [[ -z "$id" ]]; then
     echo "failed to parse task_id from response: $resp" >&2

@@ -6,7 +6,7 @@ import (
 	"github.com/dispatchhub/dispatchhub/internal/shared/domain/entity"
 )
 
-// QueueBroker defines the fast-path task queue interface.
+// QueueBroker 定义任务队列 fast-path 接口。
 type QueueBroker interface {
 	Enqueue(ctx context.Context, queue string, task *entity.Task) error
 	EnqueueDelayed(ctx context.Context, queue string, task *entity.Task) error
@@ -16,16 +16,16 @@ type QueueBroker interface {
 	PromoteDelayed(ctx context.Context, queue string, batchSize int) (int64, error)
 	Len(ctx context.Context, queue string) (int64, error)
 	Stats(ctx context.Context, queue string) (*entity.QueueStats, error)
-	// EnqueueIfNotInflight atomically checks if the task ID is in the inflight set;
-	// if not, enqueues it to the ready queue. Returns true if enqueued, false if skipped.
-	// Used by the compensate loop to avoid re-enqueuing tasks being processed.
+	// EnqueueIfNotInflight 原子检查 task ID 是否在 inflight 集合中；
+	// 若不在，则入 ready 队列。返回 true 表示已入队，false 表示已跳过。
+	// 补偿循环用它避免重复入队正在处理的任务。
 	EnqueueIfNotInflight(ctx context.Context, queue string, task *entity.Task) (bool, error)
-	// Remove removes a task from all queue stages (ready, delayed, inflight).
-	// Used when a task is cancelled to prevent workers from picking it up.
+	// Remove 从所有队列阶段（ready、delayed、inflight）移除任务。
+	// 任务取消时使用，避免 worker 再取到该任务。
 	Remove(ctx context.Context, queue string, taskID string) error
-	// PublishCancel publishes a cancel signal for the given task ID.
+	// PublishCancel 为指定 task ID 发布取消信号。
 	PublishCancel(ctx context.Context, taskID string) error
-	// SubscribeCancel subscribes to task cancel signals.
-	// Returns a channel of cancelled task IDs and a cleanup function.
+	// SubscribeCancel 订阅任务取消信号。
+	// 返回已取消 task ID 的 channel 和清理函数。
 	SubscribeCancel(ctx context.Context) (<-chan string, func(), error)
 }
