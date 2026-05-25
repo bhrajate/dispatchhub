@@ -10,6 +10,7 @@
 | [核心组件](architecture/components.md) | Scheduler / Worker / 存储层 |
 | [数据模型](architecture/data-models.md) | Task / Worker / CronJob 数据结构与状态机 |
 | [存储层设计](architecture/storage.md) | MySQL / Redis / etcd 选型与容量规划 |
+| [MySQL 设计 — 运维视角](architecture/mysql-design.md) | 索引匹配、写路径性能、容量与归档、连接池、schema 演进遗留 |
 | [队列选型分析](architecture/queue-selection.md) | 6 种 MQ 方案对比与决策推导 |
 | [队列设计](architecture/queue-design.md) | 优先级队列 / 延迟队列 / Lua 脚本详解 |
 
