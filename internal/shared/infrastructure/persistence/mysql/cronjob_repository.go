@@ -43,6 +43,28 @@ func (r *CronJobRepository) UpdateCronJob(ctx context.Context, job *entity.CronJ
 	return r.db.WithContext(ctx).Save(job).Error
 }
 
+// ClaimCronJob 用 next_run_at 作为 CAS 条件抢占触发权。
+// 双主窗口期两个 scheduler 同时调用本方法时，MySQL 行锁让它们串行：
+// 第一个 UPDATE 把 next_run_at 推进到新值（RowsAffected=1）；
+// 第二个看到的 next_run_at 已经变了，WHERE 不匹配（RowsAffected=0），返回 false。
+func (r *CronJobRepository) ClaimCronJob(
+	ctx context.Context,
+	jobID string,
+	expectedNextRunAt, newLastRunAt, newNextRunAt time.Time,
+) (bool, error) {
+	result := r.db.WithContext(ctx).
+		Model(&entity.CronJob{}).
+		Where("id = ? AND next_run_at = ?", jobID, expectedNextRunAt).
+		Updates(map[string]any{
+			"last_run_at":  newLastRunAt,
+			"next_run_at":  newNextRunAt,
+		})
+	if result.Error != nil {
+		return false, result.Error
+	}
+	return result.RowsAffected == 1, nil
+}
+
 func (r *CronJobRepository) DeleteCronJob(ctx context.Context, id string) error {
 	return r.db.WithContext(ctx).Where("id = ?", id).Delete(&entity.CronJob{}).Error
 }

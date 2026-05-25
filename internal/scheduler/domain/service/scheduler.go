@@ -82,7 +82,11 @@ func (s *SchedulerService) TriggerDueCronJobs(ctx context.Context, limit int) (i
 			continue
 		}
 
-		// 并发策略：若为 Forbid 且上一次执行仍在运行，则跳过
+		// FindDueCronJobs 已过滤 next_run_at IS NULL 的行，到这里 NextRunAt 不会为 nil。
+		expectedNextRun := *job.NextRunAt
+
+		// 并发策略：若为 Forbid 且上一次执行仍在运行，则跳过本次实际入队，
+		// 但仍需用 CAS 推进 next_run_at，避免下一轮被同一实例（或脑裂中的另一实例）反复扫到。
 		if job.ConcurrencyPolicy == entity.ConcurrencyForbid {
 			running, err := s.taskMaint.HasRunningTasks(ctx, job.Type, job.Namespace)
 			if err != nil {
@@ -90,13 +94,30 @@ func (s *SchedulerService) TriggerDueCronJobs(ctx context.Context, limit int) (i
 				continue
 			}
 			if running {
-				// 跳过本次触发，但仍推进 next_run_at
-				job.NextRunAt = &nextTime
-				_ = s.cronMaint.UpdateCronJob(ctx, job)
+				if _, err := s.cronMaint.ClaimCronJob(ctx, job.ID, expectedNextRun, now, nextTime); err != nil {
+					lastErr = fmt.Errorf("cron job %s: claim (forbid skip): %w", job.ID, err)
+				}
 				continue
 			}
 		}
 
+		// CAS 抢占：先把 next_run_at 推进到新值，成功者才有权 Create+Enqueue。
+		// 这是防御 scheduler 双主期间重复触发的关键：MySQL 行锁让两个 scheduler
+		// 的 UPDATE 串行执行，第二个的 WHERE 条件不再匹配，RowsAffected=0。
+		// 注意：CAS 必须在 Create 之前；放在之后等于先重复入队再防御，无效。
+		claimed, err := s.cronMaint.ClaimCronJob(ctx, job.ID, expectedNextRun, now, nextTime)
+		if err != nil {
+			lastErr = fmt.Errorf("cron job %s: claim: %w", job.ID, err)
+			continue
+		}
+		if !claimed {
+			// 已被其他 scheduler 实例抢占（脑裂窗口或多实例误部署），跳过本次触发。
+			log.Debugf("cron job %s: claim lost, another scheduler triggered it", job.ID)
+			continue
+		}
+
+		// CAS 成功后再 Create+Enqueue。即使后续步骤失败，最坏情况也只是漏掉本次触发，
+		// 而不会重复触发——这比"双触发"安全得多。
 		task := job.ToTask()
 		task.ID = uuid.New().String()
 		task.State = entity.TaskStatePending
@@ -104,20 +125,12 @@ func (s *SchedulerService) TriggerDueCronJobs(ctx context.Context, limit int) (i
 		task.UpdatedAt = now
 
 		if err := s.taskMaint.Create(ctx, task); err != nil {
-			lastErr = fmt.Errorf("cron job %s: create task: %w", job.ID, err)
+			lastErr = fmt.Errorf("cron job %s: create task after claim: %w", job.ID, err)
 			continue
 		}
 		if err := s.broker.Enqueue(ctx, task.QueueName, task); err != nil {
 			lastErr = fmt.Errorf("cron job %s: enqueue task: %w", job.ID, err)
 			// Task 已持久化到 MySQL 但未写入 Redis，补偿循环会修复
-			continue
-		}
-
-		// 推进 cron 调度时间
-		job.LastRunAt = &now
-		job.NextRunAt = &nextTime
-		if err := s.cronMaint.UpdateCronJob(ctx, job); err != nil {
-			lastErr = fmt.Errorf("cron job %s: update schedule: %w", job.ID, err)
 			continue
 		}
 
