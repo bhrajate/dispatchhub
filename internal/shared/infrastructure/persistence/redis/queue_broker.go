@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"math/rand/v2"
 	"time"
 
 	"github.com/dispatchhub/dispatchhub/internal/shared/domain/entity"
@@ -24,7 +25,63 @@ const (
 // DefaultVisibilityTimeout 是 inflight 任务在没有 Ack/Nack 情况下的最长可见性超时。
 // Worker 取走任务后若进程崩溃 / OOM kill / 网络断开，超过此时长仍未 ack，
 // scheduler 的回收循环会把它 HDEL inflight + ZADD ready 重新投递。
+//
+// 这是一个 floor：当 task.Timeout 显式配置且大于该值时，lease 会按
+// task.Timeout + LeaseBuffer 拉长，避免长任务被错误回收。
 const DefaultVisibilityTimeout = 30 * time.Second
+
+// LeaseBuffer 是 lease deadline 在 task.Timeout 之上额外预留的安全边界。
+// 用于覆盖 worker 端 handler 退出后到 Ack/Nack 实际写入 Redis 之间的尾部
+// 延迟（pipeline flush、网络抖动），避免 handler 刚好在 timeout 边界完成
+// 却被回收循环抢先重投。
+const LeaseBuffer = 10 * time.Second
+
+// computeVisibilityTimeout 给定单个任务，返回它的 lease 时长。
+// 规则：max(DefaultVisibilityTimeout, task.Timeout + LeaseBuffer)。
+// task.Timeout=0 表示未声明，按默认走；非零时确保 lease 严格大于 handler
+// 超时，给 worker 主动 Nack 留出窗口。
+func computeVisibilityTimeout(taskTimeout time.Duration) time.Duration {
+	if taskTimeout <= 0 {
+		return DefaultVisibilityTimeout
+	}
+	v := taskTimeout + LeaseBuffer
+	if v < DefaultVisibilityTimeout {
+		return DefaultVisibilityTimeout
+	}
+	return v
+}
+
+// MaxRetryBackoff 是单次重试退避的上限，避免指数增长把任务推到无限远的将来。
+// 5 分钟是经验值：业务能容忍的最长"再来一次"间隔，且足够让下游故障恢复。
+const MaxRetryBackoff = 5 * time.Minute
+
+// computeRetryBackoff 按 RetryCount 计算下一次重试的实际等待时长。
+//
+// 公式：base * 2^(retryCount-1) + jitter，cap 到 MaxRetryBackoff。
+//   - retryCount=1（首次失败后）→ base
+//   - retryCount=2 → 2 * base
+//   - retryCount=3 → 4 * base
+//   - ...
+//
+// jitter ∈ [0, base/4)，避免大量同时失败的任务在同一时刻被一起唤醒造成
+// "惊群"打爆下游。jitter 用 base 的 25% 而不是当前 backoff 的 25%，是为了
+// 在退避被 cap 后仍然保留足够的去同步空间。
+//
+// 调用方传入的 retryCount 应该是"即将进行的这次重试是第几次"（已经 ++ 过）。
+func computeRetryBackoff(base time.Duration, retryCount int) time.Duration {
+	if base <= 0 || retryCount <= 0 {
+		return 0
+	}
+	// 指数计算用 int64 防止 time.Duration 直接左移溢出。
+	// 2^30 = 10 亿，足以让任何合理 base 都触顶 MaxRetryBackoff。
+	shift := min(retryCount-1, 30)
+	backoff := time.Duration(int64(base) << shift)
+	if backoff > MaxRetryBackoff || backoff < 0 { // <0 防御 int64 溢出
+		backoff = MaxRetryBackoff
+	}
+	jitter := time.Duration(rand.Int64N(int64(base)/4 + 1))
+	return backoff + jitter
+}
 
 // QueueBroker 使用 Redis sorted set 实现 repository.QueueBroker。
 type QueueBroker struct {
@@ -136,8 +193,8 @@ func (q *QueueBroker) Dequeue(ctx context.Context, queues []string) (*entity.Tas
 	}
 
 	now := time.Now().UnixMilli()
-	visibilityMs := DefaultVisibilityTimeout.Milliseconds()
-	result, err := dequeueScript.Run(ctx, q.client, keys, now, visibilityMs).Result()
+	defaultVisibilityMs := DefaultVisibilityTimeout.Milliseconds()
+	result, err := dequeueScript.Run(ctx, q.client, keys, now, defaultVisibilityMs).Result()
 	if err != nil {
 		if err == redis.Nil {
 			return nil, nil
@@ -154,6 +211,22 @@ func (q *QueueBroker) Dequeue(ctx context.Context, queues []string) (*entity.Tas
 	if err := json.Unmarshal([]byte(data), &task); err != nil {
 		return nil, fmt.Errorf("unmarshal task: %w", err)
 	}
+
+	// task.Timeout 序列化为 "30m" 形式的字符串，Lua 脚本里无法解析；因此先在
+	// 脚本里以默认值落盘 lease（崩溃也有 lower bound 保护），再在 Go 侧根据
+	// task.Timeout 拉长 deadline。仅当任务声明的 timeout 超过默认值时才覆盖，
+	// 避免大量短任务多打一次 Redis 调用。
+	visibility := computeVisibilityTimeout(task.Timeout.Duration)
+	if visibility > DefaultVisibilityTimeout {
+		deadline := now + visibility.Milliseconds()
+		if err := q.client.ZAdd(ctx, leaseKeyFor(task.QueueName), redis.Z{
+			Score:  float64(deadline),
+			Member: task.ID,
+		}).Err(); err != nil {
+			return nil, fmt.Errorf("extend lease for %s: %w", task.ID, err)
+		}
+	}
+
 	return &task, nil
 }
 
@@ -176,7 +249,11 @@ func (q *QueueBroker) Nack(ctx context.Context, queue string, task *entity.Task)
 		if err != nil {
 			return err
 		}
-		executeAt := time.Now().Add(task.RetryBackoff.Duration)
+		// 指数退避 + jitter：base * 2^(RetryCount-1)，cap 到 MaxRetryBackoff。
+		// task.RetryCount 在 worker handleFailure 里已 ++，传入这里就是"即将
+		// 进行的这次重试是第几次"，符合 computeRetryBackoff 的输入语义。
+		backoff := computeRetryBackoff(task.RetryBackoff.Duration, task.RetryCount)
+		executeAt := time.Now().Add(backoff)
 		pipe.ZAdd(ctx, delayedKeyFor(queue), redis.Z{
 			Score:  float64(executeAt.UnixMilli()),
 			Member: string(data),

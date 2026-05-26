@@ -14,13 +14,14 @@ DispatchHub 的队列系统基于 Redis 实现，支持以下能力：
 
 > 源码：`internal/shared/infrastructure/persistence/redis/queue_broker.go`
 
-每个队列使用 4 个 Redis Key：
+每个队列使用 5 个 Redis Key：
 
 | Key 模式 | 类型 | 说明 |
 |----------|------|------|
 | `dispatchhub:queue:{name}:ready` | Sorted Set | 就绪队列，score = 负优先级 |
 | `dispatchhub:queue:{name}:delayed` | Sorted Set | 延迟队列，score = 执行时间戳(ms) |
 | `dispatchhub:queue:{name}:inflight` | Hash | 执行中的任务，field = taskID, value = taskJSON |
+| `dispatchhub:queue:{name}:lease` | Sorted Set | 可见性 lease，member = taskID, score = deadline(ms) |
 | `dispatchhub:queue:{name}:stats` | Hash | 统计计数器（enqueued / completed / failed） |
 
 ### Ready Queue（就绪队列）
@@ -54,6 +55,44 @@ HSET dispatchhub:queue:default:inflight "task-id-abc" '{"id":"abc",...}'
 ```
 
 任务完成后通过 Ack 删除；失败后通过 Nack 删除并重新入队。
+
+### Lease Zset（可见性超时索引）
+
+inflight Hash 的 `taskID → JSON` 适合 O(1) 查/删，但**不能按时间维度排序**。回收循环要找"在途超过可见性超时的任务"，必须用 Sorted Set 按 deadline 索引：
+
+```
+ZADD dispatchhub:queue:default:lease <dequeue_ts_ms + visibility_ms> "task-id-abc"
+```
+
+- `Dequeue` 时同时写 inflight Hash 和 lease Sorted Set（`dequeueScript` 在 Lua 内一次性完成）
+- `Ack` / `Nack` / `Remove` 同时清理两份
+- 回收循环 `ZRANGEBYSCORE lease -inf now LIMIT 0 N` 取出过期 taskID，逐个 HGET inflight 拿到原 JSON 再 ZADD 回 ready
+
+这是 Asynq 的 `active hash + lease zset` 双结构方案：用 hash 保留补偿循环 / Stats / Remove 需要的 O(1) 查询，用 zset 保留按时间排序的回收能力。
+
+#### 为什么需要 inflight 这一层？
+
+`ready` 表示"待领"，`inflight` 表示"在途"，`Ack` / `Nack` 表示"完结"。少了 `inflight` 这一中间态，会同时丢掉四块能力：
+
+**1. 防止 Worker 崩溃导致任务丢失（核心动机）**
+
+`Dequeue` 使用 `ZPOPMIN`，任务一旦弹出就从 `ready` 消失。若 Worker 在执行过程中崩溃 / OOM kill / 网络断开，任务既不在 `ready` 也没被 `Ack`，将永久丢失。
+
+引入 `inflight` + `lease` 后，scheduler 的 `reclaimInflightLoop` 每 5s 扫一次 lease zset，把超过 `DefaultVisibilityTimeout=30s` 的任务从 inflight 移回 ready 重投，实现见 `queue_broker.go` 的 `reclaimInflightScript`。这是 SQS、Sidekiq、Asynq 等队列的标准做法。
+
+**2. 与 MySQL → Redis 补偿循环去重**
+
+Scheduler 周期性扫描 MySQL 中 `pending` 状态的任务回填 Redis（防止 Redis 数据丢失后任务消失）。但任务可能已被 Worker 取走、正在执行，只是 `running` 状态尚未落库。
+
+`EnqueueIfNotInflight` Lua 脚本（`queue_broker.go:252-263`）先 `HEXISTS inflight` 再决定是否 `ZADD ready`，避免补偿循环重复入队"已被取走但未更新到 MySQL"的任务，从而保证最终一致性收敛过程中的幂等性。
+
+**3. 取消任务的覆盖面**
+
+`removeScript`（`queue_broker.go:287-316`）需要同时清理 `ready` / `delayed` / `inflight` 三处。没有 `inflight`，就无法覆盖"已 dequeue 但未执行完"这一状态下的取消语义（实际终止还需 pub/sub 通知 Worker，但状态层必须有这条记录可清理）。
+
+**4. 可观测性（Active 指标）**
+
+`Stats` 通过 `HLEN inflight` 直接拿到"当前在跑多少任务"（`Active`），是运维面板里最关键的实时指标之一。如果没有这个集合，只能去 Worker 进程里聚合，跨进程统计精度差且时延高。
 
 ---
 
@@ -283,9 +322,47 @@ Redis Ready Queue                        Hash Map
                                     └────────────────┘
 ```
 
-- 出队和移入 inflight 是原子操作
+- 出队和移入 inflight + lease 是原子操作（单条 Lua）
 - 任务在 inflight 中直到被 Ack/Nack
-- Worker 崩溃后，inflight 中的任务可被重新调度
+- Worker 崩溃后，由 scheduler 的可见性超时回收循环重新调度（见下节）
+
+### 可见性超时回收
+
+> 实现：`reclaimInflightScript` + `SchedulerAppService.reclaimInflightLoop`
+
+Worker `Dequeue` 时把任务的 deadline（`now + DefaultVisibilityTimeout`，默认 30s）写入 lease zset。Scheduler 每 5s 扫一次：
+
+```lua
+-- 简化版本
+local expired = redis.call('ZRANGEBYSCORE', lease_key, '-inf', now, 'LIMIT', 0, batch)
+for _, task_id in ipairs(expired) do
+    local data = redis.call('HGET', inflight_key, task_id)
+    redis.call('ZREM', lease_key, task_id)
+    if data then
+        redis.call('HDEL', inflight_key, task_id)
+        local task = cjson.decode(data)
+        redis.call('ZADD', ready_key, -(task.priority or 5), data)
+    end
+end
+```
+
+关键设计点：
+
+- **batch 上限 100**：避免单次 Lua 阻塞 Redis 主循环过久
+- **孤儿 lease 清理**：lease 有但 inflight 没有时，仍然 `ZREM`，避免 Remove 之后的残留条目反复触发回收
+- **优先级保留**：从 inflight Hash 取出的 JSON 解析 priority，重新计算 score，保证回收任务在 ready 中仍按原优先级排序
+- **至少一次语义的代价**：若 Worker 实际仍在执行只是慢了，回收会产生重复执行，**Handler 必须自身幂等**
+
+回收日志使用 `Warn` 级别上报，触发即提示存在 worker 健康问题（崩溃 / 处理超时 / 网络分区）。
+
+### 与 healthCheckLoop 的边界
+
+| 循环 | 检测对象 | 失败时的行为 |
+|---|---|---|
+| `healthCheckLoop` | worker 心跳（30s 阈值） | 仅在 scheduler 内存中下线该 worker，**不动 inflight 任务** |
+| `reclaimInflightLoop` | 任务 lease（30s 默认 visibility） | 把超时任务 HDEL inflight + ZADD ready 重投 |
+
+二者职责互补：worker 离线检测决定"以后不再给它分新活"，可见性超时回收决定"它没干完的活让别的 worker 来"。
 
 ### 重试机制
 
@@ -302,16 +379,29 @@ Redis Ready Queue                        Hash Map
 
 ### 防惊群效应
 
-重试使用指数退避 + 随机抖动：
+重试使用指数退避 + 随机抖动（实现见 `queue_broker.go` 的 `computeRetryBackoff`）：
 
-```
-retry 0: 1s     + jitter(0~250ms)
-retry 1: 2s     + jitter(0~500ms)
-retry 2: 4s     + jitter(0~1s)
-retry 3: 8s     + jitter(0~2s)
-...
-max:     5min   + jitter(0~75s)
-```
+**公式**：`base * 2^(RetryCount-1) + jitter`，cap 到 `MaxRetryBackoff = 5min`
+
+- `base` = 用户提交任务时设置的 `RetryBackoff`（API 字段，固定值）
+- `RetryCount` 由 worker 在 `handleFailure` 中 `++` 后传入，代表"即将进行的这次重试是第几次"
+- `jitter ∈ [0, base/4)`：用 base 而非当前 backoff 作为基准，是为了在退避被 cap 后仍保留足够的去同步空间
+
+举例 `base = 1s`：
+
+| RetryCount | backoff（不含 jitter） | jitter 范围 |
+|---|---|---|
+| 1 | 1s | 0~250ms |
+| 2 | 2s | 0~250ms |
+| 3 | 4s | 0~250ms |
+| 4 | 8s | 0~250ms |
+| ... | ... | ... |
+| 9 | 256s | 0~250ms |
+| 10+ | 5min（cap） | 0~250ms |
+
+为什么需要 jitter：大量任务同时遇到下游故障 → 全部 Nack → 如果退避是确定值，N 秒后会被一起唤醒同时重试，再次打爆下游（thundering herd）。jitter 把唤醒时刻打散，避免同步重试。
+
+为什么 cap 在 5min：业务能容忍的最长"再来一次"间隔；不 cap 的话 RetryCount=20 会算出 12 天的退避，等价于丢失任务。
 
 ---
 

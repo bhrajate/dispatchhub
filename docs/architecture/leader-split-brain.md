@@ -161,7 +161,7 @@ CAS 成功的实例继续 Create+Enqueue。CAS 失败的实例：
 
 CAS 只覆盖了 cron 触发这一条路径。如果未来出现以下需求，需要重新设计：
 
-- [ ] **worker 失联后的 running 任务回收**：当前补偿循环只看 `state=pending`，不会捞 `state=running` 的任务。worker 死亡 + Lease 过期后，这些任务卡死。建议在 inflight HASH value 里存 worker_id，扫描出 worker_id ∈ offline 的条目重置为 pending
+- [x] **worker 失联后的 running 任务回收**：已实现 `reclaimInflightLoop`（每 5s）+ lease zset（dequeue 时写入 deadline，默认 30s 可见性超时），由 `reclaimInflightScript` 把过期任务 HDEL inflight + ZADD ready。注意这是基于"任务级 lease 超时"而非"worker 级心跳过期"的方案，更通用，对 worker 慢/卡死同样兜底。详见 [queue-design.md](./queue-design.md) §"可见性超时回收"
 - [ ] **dead_letters 自动归档**：当前无清理逻辑
 - [ ] **Lease TTL 太长**：默认 15s 让双主窗口偏大；调小代价是抖动期间频繁切换。值得做基线测试找平衡点
 - [ ] 如果未来 leader-only 写操作扩展到 ≥ 3 处，应当升级到 fence token
