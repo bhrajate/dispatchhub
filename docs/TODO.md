@@ -51,3 +51,43 @@
 - [ ] **认证鉴权**：API 层无 auth，假设运行在可信 K8s 集群内；生产需要补充 mTLS 或 API Key
 - [ ] **OpenTelemetry 链路追踪**：跨 API Server / Scheduler / Worker 的端到端追踪
 - [ ] **CronJob Update API**：当前只有 Create/Get/List/Delete，缺少 Update（启用/禁用/修改表达式）
+- [ ] **Stats 维度细化**
+  - 现状：`entity.QueueStats` 只有 `Pending/Active/Scheduled/Retrying/Completed/Failed` 六个标量；`stats_key` 哈希里只 `HINCRBY enqueued/completed/failed`，没有时序、没有分位数
+  - 想加的维度：
+    1. **吞吐**：enqueue/complete/fail 速率（rolling window 或 Prometheus counter）
+    2. **延迟**：任务从 enqueue 到 dequeue 的等待时间分位数（P50/P95/P99）、handler 执行时长分位数
+    3. **失败分类**：按 task.Type 或 error 模式拆分 failed 计数，定位"是哪类任务在挂"
+    4. **per-handler / per-queue 分组**：现在所有维度都是 per-queue，看不到同队列内 handler 维度
+  - 实现方向：接入 Prometheus（推荐），`/metrics` 由 apiserver/worker/scheduler 各自暴露，避免在 Redis hash 里堆滑窗
+  - 触发：当 `GetQueueStats` 不再够用、用户开始问"哪个 handler 拖慢了 default 队列"时
+- [ ] **死信队列（DLQ）**
+  - 现状：`Nack` 在 `!task.CanRetry()` 分支只 `HINCRBY failed +1` 然后丢弃 task JSON；终态任务靠 MySQL `tasks` 表保留，但没有专门的"待人工处理"入口
+  - DLQ 价值：
+    1. 重试用尽的任务进 DLQ 而不是直接终结，运维可批量重投或检查 payload
+    2. 隔离"毒任务"——某条任务每次都让 worker panic，DLQ 后正常任务不再受影响
+    3. 配合 Stats：DLQ size 是健康度的一线指标
+  - 设计要点：
+    - 新增 `dispatchhub:queue:%s:dlq` sorted set（按 enqueue 时间排序）或单独的 MySQL `dead_tasks` 表
+    - `Nack` 在 `!CanRetry` 分支改为投 DLQ，保留完整 task JSON + 最后一次 error
+    - API 提供 `ListDLQ / RequeueFromDLQ / PurgeDLQ`
+    - 决定 DLQ 容量与 TTL（无限堆积会成为新的故障点）
+  - 触发：业务侧出现"重试用尽后想人工干预"的真实诉求，或线上观测到毒任务连环失败
+- [ ] **CronJob 历史轨迹**
+  - 现状：`CronJob.LastRunAt/NextRunAt` 只存最近一次触发时间；想看"过去 7 天这个 cron 触发了多少次、有几次失败、漂移了多久"，只能去 `tasks` 表按 `name` 模糊匹配，没有可靠关联
+  - 想要的能力：
+    1. 每次触发记录一条 `cron_run` 历史（cron_id、scheduled_at、actual_triggered_at、produced_task_id、最终 task state）
+    2. 触发漂移监控：`actual - scheduled` 持续 > 阈值 → 报警（说明 scheduler 调度循环慢了）
+    3. `Forbid` 策略 skip 计数也应有记录，便于回答"为什么这个 cron 看起来漏了一次"
+  - 实现方向：
+    - 新增 `cron_runs` 表：`(id, cron_id FK, scheduled_at, triggered_at, status enum{triggered,skipped,failed}, task_id, error)`
+    - `SchedulerService.triggerCron` 在 CAS 成功后写一条记录；skip / 入队失败也各写一条
+    - API 提供 `ListCronRuns(cron_id, from, to)`，UI 可以画时间线
+    - TTL 清理（与 task cleanup 联动）
+  - 触发：用户问"这个 cron 昨晚有没有跑"或"为什么 5 分钟的 cron 实际间隔成了 10 分钟"时
+- [ ] **Worker 周期性续约 lease**（按需）
+  - 当前：`Dequeue` 时一次性把 lease 拉到 `task.Timeout + LeaseBuffer`，长任务 worker 真死时回收延迟 ≈ Timeout
+  - 续约后：基础 lease 短（如 30s），worker 每 N 秒 `ZADD XX lease deadline taskID` 续约，死亡 ≤ N+lease 内被回收
+  - 触发条件之一再做：
+    1. 业务引入小时级长任务（视频转码 / 离线推理 / 大批量生成）
+    2. 监控显示 reclaim 延迟尾部接近 `Timeout` 而非真实 worker 死亡时刻
+  - 设计要点：续约 goroutine 生命周期跟随 handler、续约失败的降级策略、shutdown 顺序、续约频率与 Redis QPS 的权衡
