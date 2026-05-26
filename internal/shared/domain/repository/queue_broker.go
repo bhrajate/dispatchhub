@@ -23,6 +23,9 @@ type QueueBroker interface {
 	// Remove 从所有队列阶段（ready、delayed、inflight）移除任务。
 	// 任务取消时使用，避免 worker 再取到该任务。
 	Remove(ctx context.Context, queue string, taskID string) error
+	// ReclaimInflight 把可见性超时（dequeue 后未及时 Ack/Nack）的任务从 inflight
+	// 移回 ready 重投。返回回收的任务数。Worker 崩溃时的兜底机制。
+	ReclaimInflight(ctx context.Context, queue string, batchSize int) (int64, error)
 	// PublishCancel 为指定 task ID 发布取消信号。
 	PublishCancel(ctx context.Context, taskID string) error
 	// SubscribeCancel 订阅任务取消信号。

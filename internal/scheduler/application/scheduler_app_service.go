@@ -25,6 +25,8 @@ type SchedulerAppConfig struct {
 	CleanupInterval        time.Duration
 	CleanupOlderThan       time.Duration
 	CleanupBatchSize       int
+	ReclaimInflightInterval time.Duration
+	ReclaimInflightBatch    int
 }
 
 // DefaultSchedulerAppConfig 返回合理的默认配置。
@@ -42,6 +44,10 @@ func DefaultSchedulerAppConfig() SchedulerAppConfig {
 		CleanupInterval:        time.Hour,
 		CleanupOlderThan:       7 * 24 * time.Hour, // 7 天
 		CleanupBatchSize:       1000,
+		// 回收间隔需小于 DefaultVisibilityTimeout (30s)，确保超时任务被及时检测。
+		// 5s 平均回收延迟 ~2.5s，可与 healthCheckLoop 区分（后者只下线 worker）。
+		ReclaimInflightInterval: 5 * time.Second,
+		ReclaimInflightBatch:    100,
 	}
 }
 
@@ -78,6 +84,7 @@ func (s *SchedulerAppService) Run(ctx context.Context) error {
 	go s.compensateLoop(ctx)
 	go s.cronLoop(ctx)
 	go s.cleanupLoop(ctx)
+	go s.reclaimInflightLoop(ctx)
 
 	<-ctx.Done()
 	log.Info("scheduler stopped")
@@ -204,6 +211,31 @@ func (s *SchedulerAppService) cronLoop(ctx context.Context) {
 				log.Errorf("trigger cron jobs: %v", err)
 			} else if n > 0 {
 				log.Infof("triggered %d cron jobs", n)
+			}
+		}
+	}
+}
+
+// reclaimInflightLoop 定期把可见性超时的 inflight 任务移回 ready。
+// Worker 取走任务后若进程崩溃 / OOM kill / 网络分区导致未及时 Ack/Nack，
+// 任务会卡在 inflight 永不被处理；此循环按 lease zset 的 deadline 兜底回收。
+//
+// 与 healthCheckLoop 的区别：healthCheckLoop 只把 worker 标记为 offline，
+// 但不会触碰已被该 worker 取走的 inflight 任务，回收必须靠这个循环完成。
+func (s *SchedulerAppService) reclaimInflightLoop(ctx context.Context) {
+	ticker := time.NewTicker(s.cfg.ReclaimInflightInterval)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			n, err := s.domainSvc.ReclaimInflightTasks(ctx, s.cfg.ReclaimInflightBatch)
+			if err != nil {
+				log.Errorf("reclaim inflight tasks: %v", err)
+			} else if n > 0 {
+				log.Warnf("reclaimed %d inflight tasks (visibility timeout)", n)
 			}
 		}
 	}

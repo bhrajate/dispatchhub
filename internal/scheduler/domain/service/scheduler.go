@@ -173,6 +173,23 @@ func (s *SchedulerService) CleanupTerminalTasks(ctx context.Context, olderThan t
 	return s.taskMaint.DeleteTerminalOlderThan(ctx, olderThan, limit)
 }
 
+// ReclaimInflightTasks 遍历所有已知队列，把可见性超时的 inflight 任务移回 ready。
+// 当 Worker 崩溃 / OOM kill / 网络分区导致任务未及时 Ack/Nack 时，此循环兜底
+// 保证任务最终被重新投递（至少一次语义）。返回所有队列的回收总数。
+func (s *SchedulerService) ReclaimInflightTasks(ctx context.Context, batchSize int) (int64, error) {
+	var total int64
+	var lastErr error
+	for _, q := range s.Queues() {
+		n, err := s.broker.ReclaimInflight(ctx, q, batchSize)
+		if err != nil {
+			lastErr = fmt.Errorf("queue %s: %w", q, err)
+			continue
+		}
+		total += n
+	}
+	return total, lastErr
+}
+
 // SyncWorkers 从 registry 刷新 worker 列表。
 func (s *SchedulerService) SyncWorkers(ctx context.Context) (int, error) {
 	workers, err := s.registry.ListWorkers(ctx)

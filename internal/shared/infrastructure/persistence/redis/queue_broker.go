@@ -13,12 +13,18 @@ import (
 )
 
 const (
-	keyPrefix   = "dispatchhub:"
-	readyKey    = keyPrefix + "queue:%s:ready"
-	delayedKey  = keyPrefix + "queue:%s:delayed"
-	inflightKey = keyPrefix + "queue:%s:inflight"
-	statsKey    = keyPrefix + "queue:%s:stats"
+	keyPrefix     = "dispatchhub:"
+	readyKey      = keyPrefix + "queue:%s:ready"
+	delayedKey    = keyPrefix + "queue:%s:delayed"
+	inflightKey   = keyPrefix + "queue:%s:inflight"
+	leaseKey      = keyPrefix + "queue:%s:lease"
+	statsKey      = keyPrefix + "queue:%s:stats"
 )
+
+// DefaultVisibilityTimeout 是 inflight 任务在没有 Ack/Nack 情况下的最长可见性超时。
+// Worker 取走任务后若进程崩溃 / OOM kill / 网络断开，超过此时长仍未 ack，
+// scheduler 的回收循环会把它 HDEL inflight + ZADD ready 重新投递。
+const DefaultVisibilityTimeout = 30 * time.Second
 
 // QueueBroker 使用 Redis sorted set 实现 repository.QueueBroker。
 type QueueBroker struct {
@@ -32,6 +38,7 @@ func NewQueueBroker(client redis.UniversalClient) *QueueBroker {
 func readyKeyFor(queue string) string    { return fmt.Sprintf(readyKey, queue) }
 func delayedKeyFor(queue string) string  { return fmt.Sprintf(delayedKey, queue) }
 func inflightKeyFor(queue string) string { return fmt.Sprintf(inflightKey, queue) }
+func leaseKeyFor(queue string) string    { return fmt.Sprintf(leaseKey, queue) }
 func statsKeyFor(queue string) string    { return fmt.Sprintf(statsKey, queue) }
 
 var ErrQueueFull = fmt.Errorf("queue is full")
@@ -96,7 +103,16 @@ func (q *QueueBroker) EnqueueDelayed(ctx context.Context, queue string, task *en
 	}).Err()
 }
 
+// dequeueScript 原子完成"取出最高优先级任务 + 登记 inflight + 登记 lease"。
+// inflight Hash 用于补偿循环幂等校验（HEXISTS）和 Stats 实时读取（HLEN）；
+// lease Sorted Set 用于可见性超时回收循环（ZRANGEBYSCORE 找过期任务）。
+// 两者同时维护：lease zset 的成员是 task ID，score 是 deadline 毫秒时间戳。
+//
+// ARGV[1] = 当前时间戳（毫秒），ARGV[2] = 可见性超时（毫秒）
 var dequeueScript = redis.NewScript(`
+local now = tonumber(ARGV[1])
+local visibility_ms = tonumber(ARGV[2])
+local deadline = now + visibility_ms
 local queues = KEYS
 for i, queue_key in ipairs(queues) do
     local result = redis.call('ZPOPMIN', queue_key, 1)
@@ -104,7 +120,9 @@ for i, queue_key in ipairs(queues) do
         local data = result[1]
         local task = cjson.decode(data)
         local inflight_key = string.gsub(queue_key, ':ready', ':inflight')
+        local lease_key = string.gsub(queue_key, ':ready', ':lease')
         redis.call('HSET', inflight_key, task.id, data)
+        redis.call('ZADD', lease_key, deadline, task.id)
         return data
     end
 end
@@ -117,7 +135,9 @@ func (q *QueueBroker) Dequeue(ctx context.Context, queues []string) (*entity.Tas
 		keys[i] = readyKeyFor(queue)
 	}
 
-	result, err := dequeueScript.Run(ctx, q.client, keys).Result()
+	now := time.Now().UnixMilli()
+	visibilityMs := DefaultVisibilityTimeout.Milliseconds()
+	result, err := dequeueScript.Run(ctx, q.client, keys, now, visibilityMs).Result()
 	if err != nil {
 		if err == redis.Nil {
 			return nil, nil
@@ -140,6 +160,7 @@ func (q *QueueBroker) Dequeue(ctx context.Context, queues []string) (*entity.Tas
 func (q *QueueBroker) Ack(ctx context.Context, queue string, taskID string) error {
 	pipe := q.client.Pipeline()
 	pipe.HDel(ctx, inflightKeyFor(queue), taskID)
+	pipe.ZRem(ctx, leaseKeyFor(queue), taskID)
 	pipe.HIncrBy(ctx, statsKeyFor(queue), "completed", 1)
 	_, err := pipe.Exec(ctx)
 	return err
@@ -148,6 +169,7 @@ func (q *QueueBroker) Ack(ctx context.Context, queue string, taskID string) erro
 func (q *QueueBroker) Nack(ctx context.Context, queue string, task *entity.Task) error {
 	pipe := q.client.Pipeline()
 	pipe.HDel(ctx, inflightKeyFor(queue), task.ID)
+	pipe.ZRem(ctx, leaseKeyFor(queue), task.ID)
 
 	if task.CanRetry() && task.RetryBackoff.Duration > 0 {
 		data, err := json.Marshal(task)
@@ -217,6 +239,7 @@ func (q *QueueBroker) Stats(ctx context.Context, queue string) (*entity.QueueSta
 	pipe := q.client.Pipeline()
 	readyCmd := pipe.ZCard(ctx, readyKeyFor(queue))
 	delayedCmd := pipe.ZCard(ctx, delayedKeyFor(queue))
+	// HLEN inflight 即可表示 active；lease zset 仅用于回收循环，不参与 Stats。
 	inflightCmd := pipe.HLen(ctx, inflightKeyFor(queue))
 	completedCmd := pipe.HGet(ctx, statsKeyFor(queue), "completed")
 	failedCmd := pipe.HGet(ctx, statsKeyFor(queue), "failed")
@@ -282,7 +305,7 @@ func (q *QueueBroker) EnqueueIfNotInflight(ctx context.Context, queue string, ta
 const cancelChannel = keyPrefix + "task:cancel"
 
 // removeScript 原子地从所有队列阶段移除任务。
-// KEYS[1] = ready key，KEYS[2] = delayed key，KEYS[3] = inflight key
+// KEYS[1] = ready key，KEYS[2] = delayed key，KEYS[3] = inflight key，KEYS[4] = lease key
 // ARGV[1] = 用于匹配 JSON member 的 task ID
 var removeScript = redis.NewScript(`
 local removed = 0
@@ -290,6 +313,8 @@ local removed = 0
 if redis.call('HDEL', KEYS[3], ARGV[1]) == 1 then
     removed = removed + 1
 end
+-- 从 lease zset 中移除（taskID -> deadline）
+redis.call('ZREM', KEYS[4], ARGV[1])
 -- 从 ready sorted set 中移除（扫描 JSON member 中匹配的 task ID）
 local cursor = "0"
 repeat
@@ -317,13 +342,79 @@ return removed
 
 func (q *QueueBroker) Remove(ctx context.Context, queue string, taskID string) error {
 	_, err := removeScript.Run(ctx, q.client,
-		[]string{readyKeyFor(queue), delayedKeyFor(queue), inflightKeyFor(queue)},
+		[]string{readyKeyFor(queue), delayedKeyFor(queue), inflightKeyFor(queue), leaseKeyFor(queue)},
 		taskID,
 	).Int64()
 	if err != nil && err != redis.Nil {
 		return fmt.Errorf("remove task %s from queue %s: %w", taskID, queue, err)
 	}
 	return nil
+}
+
+// reclaimInflightScript 扫描 lease zset 中 deadline 已过的 task ID，
+// 把对应任务从 inflight 移回 ready，让其重新可被消费。
+//
+// 处理过程对每条到期任务原子执行：
+//  1. ZREM lease zset
+//  2. HGET inflight 拿到原 task JSON
+//  3. HDEL inflight
+//  4. ZADD ready（按原 priority 计算 score）
+//
+// 限制 batch 数量避免 Lua 阻塞 Redis 主循环（DefaultReclaimBatch=100）。
+//
+// KEYS[1] = lease key，KEYS[2] = inflight key，KEYS[3] = ready key
+// ARGV[1] = 当前时间戳（毫秒），ARGV[2] = batch 上限
+// 返回：实际回收的任务数
+var reclaimInflightScript = redis.NewScript(`
+local lease_key = KEYS[1]
+local inflight_key = KEYS[2]
+local ready_key = KEYS[3]
+local now = tonumber(ARGV[1])
+local batch = tonumber(ARGV[2])
+local expired = redis.call('ZRANGEBYSCORE', lease_key, '-inf', now, 'LIMIT', 0, batch)
+if #expired == 0 then
+    return 0
+end
+local reclaimed = 0
+for _, task_id in ipairs(expired) do
+    local data = redis.call('HGET', inflight_key, task_id)
+    redis.call('ZREM', lease_key, task_id)
+    if data then
+        redis.call('HDEL', inflight_key, task_id)
+        local task = cjson.decode(data)
+        local score = -(task.priority or 5)
+        redis.call('ZADD', ready_key, score, data)
+        reclaimed = reclaimed + 1
+    end
+end
+return reclaimed
+`)
+
+// DefaultReclaimBatch 是单次回收循环处理的最大任务数。
+const DefaultReclaimBatch = 100
+
+// ReclaimInflight 扫描指定队列的 lease zset，把可见性超时的任务从 inflight
+// 移回 ready，返回实际回收的数量。Worker 进程崩溃 / OOM kill / 网络分区导致
+// 任务未及时 Ack/Nack 时，scheduler 周期调用此方法兜底，避免任务永久卡住。
+//
+// 注意：这是"至少一次"语义的代价 —— 若 Worker 实际仍在执行只是慢了，回收后
+// 可能产生重复执行。Handler 自身需要幂等。
+func (q *QueueBroker) ReclaimInflight(ctx context.Context, queue string, batchSize int) (int64, error) {
+	if batchSize <= 0 {
+		batchSize = DefaultReclaimBatch
+	}
+	now := time.Now().UnixMilli()
+	result, err := reclaimInflightScript.Run(ctx, q.client,
+		[]string{leaseKeyFor(queue), inflightKeyFor(queue), readyKeyFor(queue)},
+		now, batchSize,
+	).Int64()
+	if err != nil && err != redis.Nil {
+		return 0, fmt.Errorf("reclaim inflight in queue %s: %w", queue, err)
+	}
+	if result > 0 {
+		log.Warnf("reclaimed %d inflight tasks in queue %s (visibility timeout exceeded)", result, queue)
+	}
+	return result, nil
 }
 
 func (q *QueueBroker) PublishCancel(ctx context.Context, taskID string) error {
