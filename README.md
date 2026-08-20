@@ -173,17 +173,6 @@ curl http://localhost:8080/api/v1/queues/default/stats
 | 日志 | Zap 结构化 JSON |
 | 容器化 | Docker 多阶段构建, K8s + Helm + HPA |
 
-## 文档
-
-完整索引见 [docs/README.md](docs/README.md)。常用入口：
-
-| 分组 | 文档 |
-|------|------|
-| 架构设计 | [架构总览](docs/architecture/architecture.md) · [核心组件](docs/architecture/components.md) · [数据模型](docs/architecture/data-models.md) · [存储层设计](docs/architecture/storage.md) · [队列选型分析](docs/architecture/queue-selection.md) · [队列设计](docs/architecture/queue-design.md) |
-| 接口与运维 | [API 参考](docs/reference/api-reference.md) · [部署指南](docs/reference/deployment.md) · [配置参考](docs/reference/configuration.md) |
-| 修复记录 | [docs/fixes/](docs/fixes/) · [全量代码审查](docs/fixes/2026-04-14-optimization-analysis.md) |
-| 项目规划 | [TODO 清单](docs/TODO.md) |
-
 ## License
 
 MIT
