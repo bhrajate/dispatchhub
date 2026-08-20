@@ -60,8 +60,7 @@ dispatchhub/
 │   ├── shared/                         # 跨服务共享
 │   │   ├── domain/
 │   │   │   ├── entity/                 # Task, Worker, CronJob, Queue
-│   │   │   ├── repository/             # 仓储接口 (QueueBroker, TaskStore, WorkerRegistry)
-│   │   │   └── service/                # 领域服务接口
+│   │   │   └── repository/             # 仓储接口 (QueueBroker, TaskStore, WorkerRegistry, CronJobRepository)
 │   │   └── infrastructure/
 │   │       ├── config/                 # 配置管理
 │   │       ├── version/                # 版本信息 (ldflags 注入)
@@ -71,17 +70,21 @@ dispatchhub/
 │   │           └── etcd/               # WorkerRegistry 实现
 │   ├── apiserver/                      # API Server
 │   │   ├── domain/service/             # TaskServiceImpl + Hooks
+│   │   ├── infrastructure/config/      # API Server 配置
 │   │   └── interfaces/{grpc,http}/     # gRPC + REST 接口
 │   ├── scheduler/                      # Scheduler
 │   │   ├── domain/service/             # SchedulerService (纯领域逻辑)
 │   │   ├── application/                # 应用层编排 (reconciliation loops)
-│   │   └── infrastructure/election/    # etcd Leader 选举
+│   │   └── infrastructure/
+│   │       ├── config/                 # Scheduler 配置
+│   │       └── election/               # etcd Leader 选举
 │   └── worker/                         # Worker
 │       ├── application/service/        # 执行引擎 + 背压控制
+│       ├── infrastructure/config/      # Worker 配置
 │       └── interfaces/middleware/      # Recovery / Logging / Timeout
-├── pkg/{log,metrics,ratelimit,retry,signals,cronutil}/
+├── pkg/{log,metrics,ratelimit,signals,cronutil}/
 ├── api/proto/                          # Protobuf 定义
-├── deploy/{kubernetes,helm}/           # K8s YAML + Helm Chart
+├── deploy/{kubernetes,helm,mysql}/    # K8s YAML + Helm Chart + MySQL 建表 SQL
 ├── config/                             # 各服务配置文件
 │   ├── apiserver.yaml
 │   ├── scheduler.yaml
@@ -178,7 +181,6 @@ curl http://localhost:8080/api/v1/queues/default/stats
 |------|------|
 | 架构设计 | [架构总览](docs/architecture/architecture.md) · [核心组件](docs/architecture/components.md) · [数据模型](docs/architecture/data-models.md) · [存储层设计](docs/architecture/storage.md) · [队列选型分析](docs/architecture/queue-selection.md) · [队列设计](docs/architecture/queue-design.md) |
 | 接口与运维 | [API 参考](docs/reference/api-reference.md) · [部署指南](docs/reference/deployment.md) · [配置参考](docs/reference/configuration.md) |
-| 面试与简历 | [面试讲解](docs/interview/interview.md) · [项目介绍](docs/interview/project-introduction.md) · [简历版描述](docs/interview/resume.md) · [为什么不用 Asynq/Celery](docs/interview/why-not-asynq-celery.md) · [为什么不用 MySQL 队列](docs/interview/why-not-mysql-queue.md) |
 | 修复记录 | [docs/fixes/](docs/fixes/) · [全量代码审查](docs/fixes/2026-04-14-optimization-analysis.md) |
 | 项目规划 | [TODO 清单](docs/TODO.md) |
 

@@ -21,7 +21,7 @@
 | `scheduler` 补偿刷新 (`TouchUpdatedAt`) | `UPDATE tasks SET updated_at=? WHERE id=?` | PRIMARY (id) | 故意不递增 version，避免破坏 worker 持有的旧版本号 |
 | `cron` 触发新任务 | `INSERT INTO tasks ...` | PRIMARY (id) | 同提交路径 |
 
-**关键约束**：所有写入都按 `id` 单行操作。**没有任何 `SELECT ... FOR UPDATE` 或区间锁**，并发由乐观锁（`version` 字段）兜底。这是项目**用 Redis 做队列、不让 MySQL 当队列**的直接体现 —— 详见 [`why-not-mysql-queue.md`](../interview/why-not-mysql-queue.md)。
+**关键约束**：所有写入都按 `id` 单行操作。**没有任何 `SELECT ... FOR UPDATE` 或区间锁**，并发由乐观锁（`version` 字段）兜底。这是项目**用 Redis 做队列、不让 MySQL 当队列**的直接体现 —— 详见 [队列选型分析](queue-selection.md)。
 
 ### 1.2 读路径
 
